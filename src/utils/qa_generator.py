@@ -179,7 +179,8 @@ class QAGenerator:
             
             # Add conversation history if available
             if conversation_history:
-                user_prompt_parts.append(f"Conversation History: {conversation_history}")
+                formatted_history = self._format_conversation_history(conversation_history)
+                user_prompt_parts.append(f"Conversation History:\n{formatted_history}")
             
             if memory_context:
                 user_prompt_parts.append(f"Previous conversation context:\n{memory_context}")
@@ -379,12 +380,9 @@ class QAGenerator:
                 # In this system, any assistant message that's a question is a clarification question
                 # These should not be used as context for query analysis
                 if role == "assistant" and content:
-                    content_str = str(content)
-                    # Remove CLARIFICATION_MARKER if present to check the actual question
-                    # The marker is embedded but we want to check the actual content
-                    content_without_marker = re.sub(r'<!--CLARIFICATION_MARKER:[^>]+-->', '', content_str).strip()
+                    content_str = str(content).strip()
                     # If it's a question (ends with '?'), skip it - it's a clarification question
-                    if content_without_marker.endswith('?'):
+                    if content_str.endswith('?'):
                         continue  # Skip this message
                 
                 serializable_history.append({
@@ -1186,7 +1184,8 @@ You will be provided with context from Polkadot documentation and forum posts. P
         
         # Add conversation history if available
         if conversation_history:
-            prompt_parts.append(f"Conversation History: {conversation_history}")
+            formatted_history = self._format_conversation_history(conversation_history)
+            prompt_parts.append(f"Conversation History:\n{formatted_history}")
         
         # Add memory context if available
         if memory_context:

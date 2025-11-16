@@ -148,7 +148,7 @@ class ConversationMessage(BaseModel):
     query: str = Field(..., description="Previous user query")
     response: str = Field(..., description="Previous AI response")
     timestamp: str = Field(..., description="ISO timestamp of the message")
-    original_answer: Optional[str] = Field(default=None, description="Original answer with markers for conversation history")
+    original_answer: Optional[str] = Field(default=None, description="Deprecated - no longer used")
 
 class QueryRequest(BaseModel):
     question: str = Field(..., description="The question to ask", min_length=1, max_length=500)
@@ -274,15 +274,24 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
     
         conversation_history_dicts = None
         if request.conversation_history:
-            conversation_history_dicts = [
-                {
-                    'query': msg.query,
-                    'response': msg.response,
-                    'timestamp': msg.timestamp,
-                    'original_answer': msg.original_answer if hasattr(msg, 'original_answer') and msg.original_answer else None
-                }
-                for msg in request.conversation_history
-            ]
+            logger.info(f"Received conversation history with {len(request.conversation_history)} messages")
+            conversation_history_dicts = []
+            for i, msg in enumerate(request.conversation_history):
+                if msg.query:
+                    conversation_history_dicts.append({
+                        'role': 'user',
+                        'content': msg.query,
+                        'timestamp': msg.timestamp
+                    })
+                if msg.response:
+                    conversation_history_dicts.append({
+                        'role': 'assistant',
+                        'content': msg.response,
+                        'timestamp': msg.timestamp
+                    })
+            logger.info(f"Converted to {len(conversation_history_dicts)} dict entries")
+        else:
+            logger.info("No conversation history received")
         
         # Use new query processing pipeline
         try:
@@ -355,12 +364,10 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
         logger.info(f"Query processed in {processing_time:.2f}ms for user {request.user_id} (remaining: {remaining_requests}, route: {qa_result.get('route', 'unknown')})")
         
 
-        original_answer = qa_result['answer']
-        answer = original_answer
-        # Strip clarification marker from displayed answer (it's visible in some UIs)
-        # Store original with marker in original_answer field for conversation history
+        answer = qa_result['answer']
+        # No need to strip markers - we don't use them anymore
         if answer:
-            answer = re.sub(r'<!--CLARIFICATION_MARKER:[^>]+-->', '', answer).strip()
+            answer = answer.strip()
         
         print(answer)
 
@@ -376,7 +383,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             processing_time_ms=processing_time,
             timestamp=datetime.now().isoformat(),
             search_method=qa_result.get('search_method', 'unknown'),
-            original_answer=original_answer if '<!--CLARIFICATION_MARKER:' in original_answer else None
+            original_answer=None  # No longer needed - using conversation history pattern
         )
         
     except Exception as e:

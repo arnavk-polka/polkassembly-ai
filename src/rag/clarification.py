@@ -4,8 +4,6 @@ Clarification handler for low-confidence queries.
 
 from typing import Dict, Any, Optional, List
 import logging
-import base64
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -135,11 +133,9 @@ You help clarify ambiguous user queries by asking one specific question. Always 
         else:
             clarification_question = "Could you please provide more details about what you're looking for?"
     
-    # Embed hidden marker with original query, route, and router confidence for later detection
-    # Format: <!--CLARIFICATION_MARKER:base64_encoded_query|route|router_confidence-->
-    encoded_query = base64.b64encode(query.encode('utf-8')).decode('utf-8')
-    marker = f"<!--CLARIFICATION_MARKER:{encoded_query}|{route}|{router_confidence:.3f}-->"
-    clarification_question_with_marker = f"{clarification_question}\n{marker}"
+    # No need for markers - conversation history pattern is sufficient
+    # The detection function will identify clarifications by checking if last assistant message is a question
+    clarification_question_with_marker = clarification_question
     
     log_step("clarification_complete", {
         "question": clarification_question[:100],

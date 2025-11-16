@@ -744,8 +744,22 @@ class Query2SQL:
                 "result from db": combined_summary
             }
             
+            # Format conversation history for prompt
+            history_text = "No previous conversation"
+            if conversation_history:
+                history_parts = []
+                for i, msg in enumerate(conversation_history, 1):
+                    role = msg.get("role", "user").capitalize()
+                    content = msg.get("content", "")
+                    if content:
+                        history_parts.append(f"{i}. {role}: {content[:200]}")
+                if history_parts:
+                    history_text = "\n".join(history_parts)
+            
             prompt = f"""
-            Conversation History: {conversation_history}
+            Conversation History:
+            {history_text}
+            
             Current Query: {natural_query}
             {json.dumps(db_result, indent=2)}
             
@@ -1213,10 +1227,23 @@ class Query2SQL:
         else:
             logger.info("⚠️  No embedding manager - SQL generation without governance examples")
         
+        # Format conversation history for SQL generation
+        history_text = "No previous conversation"
+        if conversation_history:
+            history_parts = []
+            for i, msg in enumerate(conversation_history, 1):
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")
+                if content:
+                    history_parts.append(f"{i}. {role}: {content[:150]}")
+            if history_parts:
+                history_text = "\n".join(history_parts)
+        
         base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries.
 
 CONVERSATION CONTEXT:
-Conversation history: {conversation_history}
+Conversation history:
+{history_text}
 - If current query is a follow-up: Generate SQL that builds upon or references previous context
 - If current query is standalone: Generate SQL independently
 - Use your judgment to determine query relationships
@@ -1347,11 +1374,24 @@ DATABASE SCHEMA:
     def _generate_and_execute_with_retry(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> Tuple[List[str], List[Tuple[List[Dict[str, Any]], List[str]]]]:
         """Generate SQL queries and execute them with error correction and retry mechanism"""
         
+        # Format conversation history for SQL generation
+        history_text = "No previous conversation"
+        if conversation_history:
+            history_parts = []
+            for i, msg in enumerate(conversation_history, 1):
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")
+                if content:
+                    history_parts.append(f"{i}. {role}: {content[:150]}")
+            if history_parts:
+                history_text = "\n".join(history_parts)
+        
         # Base system prompt
         base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries.
 
 CONVERSATION CONTEXT:
-Conversation history: {conversation_history}
+Conversation history:
+{history_text}
 - If current query is a follow-up: Generate SQL that builds upon or references previous context
 - If current query is standalone: Generate SQL independently
 - Use your judgment to determine query relationships

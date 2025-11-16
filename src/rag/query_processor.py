@@ -6,7 +6,6 @@ Implements the new routing-first architecture with structured logging.
 import logging
 import json
 import re
-import base64
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -144,216 +143,98 @@ async def detect_and_handle_clarification_response(
 ) -> Optional[Dict[str, Any]]:
     """
     Detect if the current user message is a response to a clarification question.
-    Uses embedded marker in the clarification response for reliable detection.
+    Uses simple conversation history pattern: if last assistant message is a question,
+    and we can find the original user query before it, treat as clarification.
     
     Args:
         userMessage: The current user message
-        conversationHistory: Previous conversation messages
-        qa_generator: QA generator instance (not used but kept for compatibility)
+        conversationHistory: Previous conversation messages in format [{'role': 'user/assistant', 'content': '...'}, ...]
+        qa_generator: QA generator instance
         log_step: Logging function
         
     Returns:
         None if not a clarification response, or dict with:
         - combined_query: Original query + clarification response
         - original_query: The original query that needed clarification
-        - original_route: The original route that was used
+        - original_route: The original route (determined by re-routing)
         - clarification_response: The user's clarification response
     """
-    if not conversationHistory or len(conversationHistory) < 1:
-        log_step("clarification_check_no_history", {"note": "No conversation history available"}, "debug")
+    if not conversationHistory or len(conversationHistory) < 2:
+        log_step("clarification_check_no_history", {"note": "Not enough conversation history"}, "debug")
         return None
     
-    # Get the last conversation entry
+    # Get the last assistant message (should be the clarification question)
     last_entry = conversationHistory[-1]
-    # Handle both Pydantic models and dicts
-    last_response = None
-    if hasattr(last_entry, 'response'):
-        # Check original_answer first if available (it has the marker)
-        if hasattr(last_entry, 'original_answer') and last_entry.original_answer:
-            last_response = last_entry.original_answer.strip()
-        else:
-            last_response = last_entry.response.strip()
-    elif isinstance(last_entry, dict):
-        # Check original_answer first if available (it has the marker)
-        original_answer = last_entry.get('original_answer', '')
-        if original_answer and '<!--CLARIFICATION_MARKER:' in original_answer:
-            last_response = original_answer.strip()
-        else:
-            last_response = last_entry.get('response', '').strip()
+    if isinstance(last_entry, dict):
+        last_role = last_entry.get('role', '')
+        last_content = last_entry.get('content', '') or last_entry.get('response', '')
+    elif hasattr(last_entry, 'role'):
+        last_role = last_entry.role
+        last_content = getattr(last_entry, 'content', None) or getattr(last_entry, 'response', '')
     else:
         log_step("clarification_check_invalid_format", {"entry_type": str(type(last_entry))}, "debug")
         return None
     
-    if not last_response:
-        log_step("clarification_check_empty_response", {"note": "Last response is empty"}, "debug")
+    # Check if last message is an assistant question (clarification)
+    if last_role != 'assistant' or not last_content or not last_content.strip().endswith('?'):
+        log_step("clarification_check_not_question", {
+            "last_role": last_role,
+            "is_question": last_content.strip().endswith('?') if last_content else False
+        }, "debug")
         return None
     
-    log_step("clarification_check_scanning", {
-        "last_response_preview": last_response[:200],
-        "user_message": userMessage[:100],
-        "has_marker": '<!--CLARIFICATION_MARKER:' in last_response if last_response else False
+    # Find the user query that came before this clarification question
+    # Look backwards through history: assistant question -> user query (the one we need)
+    original_query = None
+    for i in range(len(conversationHistory) - 2, -1, -1):
+        entry = conversationHistory[i]
+        if isinstance(entry, dict):
+            role = entry.get('role', '')
+            if role == 'user':
+                content = entry.get('content', '') or entry.get('query', '')
+                if content:
+                    original_query = content
+                    break
+        elif hasattr(entry, 'query'):
+            original_query = entry.query
+            break
+    
+    if not original_query:
+        log_step("clarification_check_no_original_query", {
+            "note": "Found clarification question but couldn't find original user query"
+        }, "debug")
+        return None
+    
+    log_step("clarification_detected", {
+        "original_query": original_query[:100],
+        "clarification_question": last_content[:100],
+        "clarification_response": userMessage[:100]
     }, "info")
     
-    # Look for the embedded clarification marker
-    # Try new format first: <!--CLARIFICATION_MARKER:base64_encoded_query|route|router_confidence-->
-    marker_pattern_new = r'<!--CLARIFICATION_MARKER:([A-Za-z0-9+/=]+)\|([a-z]+)\|([0-9.]+)-->'
-    marker_match = re.search(marker_pattern_new, last_response)
+    # Re-route the original query to determine route and confidence
+    route_result = await route_query_llm(
+        original_query,
+        conversationHistory[:-1] if conversationHistory else None,  # Exclude the clarification question
+        qa_generator
+    )
+    original_route = route_result.get("route", "dynamic")
+    original_router_confidence = route_result.get("confidence", 0.8)
     
-    if marker_match:
-        try:
-            # Decode the original query, route, and router confidence from the marker
-            encoded_query = marker_match.group(1)
-            original_route = marker_match.group(2)
-            original_router_confidence = float(marker_match.group(3))
-            original_query = base64.b64decode(encoded_query.encode('utf-8')).decode('utf-8')
-            
-            log_step("clarification_detected_marker", {
-                "method": "embedded_marker_new_format",
-                "original_query": original_query[:100],
-                "original_route": original_route,
-                "original_router_confidence": original_router_confidence,
-                "clarification_response": userMessage[:100]
-            })
-            
-            # Use LLM to intelligently combine original query with clarification response
-            combined_query = await combine_query_with_clarification(
-                original_query,
-                userMessage,
-                qa_generator,
-                log_step
-            )
-            
-            return {
-                'combined_query': combined_query,
-                'original_query': original_query,
-                'original_route': original_route,
-                'original_router_confidence': original_router_confidence,
-                'clarification_response': userMessage
-            }
-        except Exception as e:
-            log_step("clarification_marker_decode_error", {
-                "error": str(e),
-                "note": "Failed to decode new format marker, trying intermediate format"
-            }, "warning")
-            marker_match = None
+    # Use LLM to intelligently combine original query with clarification response
+    combined_query = await combine_query_with_clarification(
+        original_query,
+        userMessage,
+        qa_generator,
+        log_step
+    )
     
-    # Fallback to intermediate format (backward compatibility): <!--CLARIFICATION_MARKER:base64_encoded_query|route-->
-    if not marker_match:
-        marker_pattern_intermediate = r'<!--CLARIFICATION_MARKER:([A-Za-z0-9+/=]+)\|([a-z]+)-->'
-        marker_match = re.search(marker_pattern_intermediate, last_response)
-        
-        if marker_match:
-            try:
-                # Decode the original query and route from the marker (intermediate format doesn't have router_confidence)
-                encoded_query = marker_match.group(1)
-                original_route = marker_match.group(2)
-                original_query = base64.b64decode(encoded_query.encode('utf-8')).decode('utf-8')
-                
-                log_step("clarification_detected_marker", {
-                    "method": "embedded_marker_intermediate_format",
-                    "original_query": original_query[:100],
-                    "original_route": original_route,
-                    "note": "Intermediate format marker - re-routing to get router confidence",
-                    "clarification_response": userMessage[:100]
-                })
-                
-                # Re-route the original query to get router confidence
-                route_result = await route_query_llm(
-                    original_query,
-                    conversationHistory[:-1] if conversationHistory else None,  # Exclude the clarification response
-                    qa_generator
-                )
-                original_router_confidence = route_result.get("confidence", 0.7)
-                
-                log_step("clarification_intermediate_format_confidence_determined", {
-                    "original_query": original_query[:100],
-                    "determined_route": original_route,
-                    "determined_router_confidence": original_router_confidence
-                })
-                
-                # Use LLM to intelligently combine original query with clarification response
-                combined_query = await combine_query_with_clarification(
-                    original_query,
-                    userMessage,
-                    qa_generator,
-                    log_step
-                )
-                
-                return {
-                    'combined_query': combined_query,
-                    'original_query': original_query,
-                    'original_route': original_route,
-                    'original_router_confidence': original_router_confidence,
-                    'clarification_response': userMessage
-                }
-            except Exception as e:
-                log_step("clarification_marker_decode_error", {
-                    "error": str(e),
-                    "note": "Failed to decode intermediate format marker, trying old format"
-                }, "warning")
-                marker_match = None
-    
-    # Fallback to old format (backward compatibility): <!--CLARIFICATION_MARKER:base64_encoded_query-->
-    if not marker_match:
-        marker_pattern_old = r'<!--CLARIFICATION_MARKER:([A-Za-z0-9+/=]+)-->'
-        marker_match = re.search(marker_pattern_old, last_response)
-        
-        if marker_match:
-            try:
-                # Decode the original query from the marker (old format doesn't have route or router_confidence)
-                encoded_query = marker_match.group(1)
-                original_query = base64.b64decode(encoded_query.encode('utf-8')).decode('utf-8')
-                
-                log_step("clarification_detected_marker", {
-                    "method": "embedded_marker_old_format",
-                    "original_query": original_query[:100],
-                    "note": "Old format marker - re-routing original query to determine route and confidence",
-                    "clarification_response": userMessage[:100]
-                })
-                
-                # Re-route the original query to determine what route it should have been
-                route_result = await route_query_llm(
-                    original_query,
-                    conversationHistory[:-1] if conversationHistory else None,  # Exclude the clarification response
-                    qa_generator
-                )
-                original_route = route_result.get("route", "static")
-                original_router_confidence = route_result.get("confidence", 0.7)
-                
-                log_step("clarification_old_format_route_determined", {
-                    "original_query": original_query[:100],
-                    "determined_route": original_route,
-                    "determined_router_confidence": original_router_confidence
-                })
-                
-                # Use LLM to intelligently combine original query with clarification response
-                combined_query = await combine_query_with_clarification(
-                    original_query,
-                    userMessage,
-                    qa_generator,
-                    log_step
-                )
-                
-                return {
-                    'combined_query': combined_query,
-                    'original_query': original_query,
-                    'original_route': original_route,
-                    'original_router_confidence': original_router_confidence,
-                    'clarification_response': userMessage
-                }
-            except Exception as e:
-                log_step("clarification_marker_decode_error", {
-                    "error": str(e),
-                    "note": "Failed to decode old format marker, treating as normal query"
-                }, "warning")
-                return None
-    
-    # No marker found - not a clarification response
-    log_step("clarification_check_no_marker", {
-        "note": "No clarification marker found in last response",
-        "last_response_preview": last_response[:200] if 'last_response' in locals() else "N/A"
-    }, "debug")
-    return None
+    return {
+        'combined_query': combined_query,
+        'original_query': original_query,
+        'original_route': original_route,
+        'original_router_confidence': original_router_confidence,
+        'clarification_response': userMessage
+    }
 
 
 async def route_query_llm(
@@ -383,7 +264,8 @@ async def route_query_llm(
                     role = msg.get('role', '')
                     content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '')
                     if content and len(content) > 5:
-                        context_parts.append(f"{role}: {content[:100]}")
+                        role_display = role if role else 'user'
+                        context_parts.append(f"{role_display}: {content[:100]}")
             if context_parts:
                 conversation_context = f"\n\nRecent conversation context:\n" + "\n".join(context_parts)
         
