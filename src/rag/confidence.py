@@ -22,6 +22,13 @@ async def getSemanticCompletenessScore(query: str, qa_generator) -> float:
     """
     prompt = f"""Rate how specific this query is for SQL generation from 0.0 (very vague) to 1.0 (highly specific). Return only the number.
 
+CRITICAL: URL HANDLING:
+- If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), this is HIGHLY SPECIFIC (score 0.9-1.0)
+- URLs contain specific proposal/referenda IDs and network information
+- Extract: polkadot.polkassembly.io/referenda/1781 = referenda 1781 on Polkadot network (very specific)
+- Extract: kusama.polkassembly.io/referenda/123 = referenda 123 on Kusama network (very specific)
+- URLs are NOT vague - they point to specific on-chain data
+
 Query: {query}"""
     
     try:

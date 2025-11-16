@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 async def combine_query_with_clarification(
     original_query: str,
     clarification_response: str,
+    clarification_question: str,
     qa_generator,
     log_step
 ) -> str:
@@ -30,6 +31,7 @@ async def combine_query_with_clarification(
     Args:
         original_query: The original ambiguous query
         clarification_response: The user's response to the clarification question
+        clarification_question: The clarification question that was asked (needed to understand context)
         qa_generator: QA generator instance
         log_step: Logging function
     
@@ -38,6 +40,7 @@ async def combine_query_with_clarification(
     """
     log_step("query_combination_start", {
         "original_query": original_query[:100],
+        "clarification_question": clarification_question[:100],
         "clarification_response": clarification_response[:100]
     })
     
@@ -46,22 +49,31 @@ You are helping to combine a user's original query with their clarification resp
 
 Original query: "{original_query}"
 
+Clarification question that was asked: "{clarification_question}"
+
 User's clarification response: "{clarification_response}"
 
 Your task:
+- Understand what the user's clarification response means in the context of the clarification question
 - Create a single, clear, and coherent query that combines both the original intent and the clarification
 - Make it natural and well-formed
 - Preserve the original intent while incorporating the clarification details
 - Do NOT add any explanations or meta-commentary - just output the combined query
 
-Example:
+Examples:
 Original: "show me proposals"
-Clarification: "on Polkadot network"
+Clarification question: "Are you looking for information on the Polkadot or Kusama network?"
+Clarification response: "Polkadot"
 Combined: "show me proposals on Polkadot network"
 
-Another example:
+Original: "how many unique voters were there in november 2025"
+Clarification question: "Are you looking for information on the Polkadot or Kusama network?"
+Clarification response: "both"
+Combined: "how many unique voters were there in november 2025 on both Polkadot and Kusama networks"
+
 Original: "what is governance"
-Clarification: "I want to see recent proposals"
+Clarification question: "What specific aspect of governance are you interested in?"
+Clarification response: "I want to see recent proposals"
 Combined: "what is governance and show me recent proposals"
 
 Now create the combined query:
@@ -221,9 +233,11 @@ async def detect_and_handle_clarification_response(
     original_router_confidence = route_result.get("confidence", 0.8)
     
     # Use LLM to intelligently combine original query with clarification response
+    # Pass the clarification question so the LLM understands what the response means
     combined_query = await combine_query_with_clarification(
         original_query,
         userMessage,
+        last_content,  # The clarification question
         qa_generator,
         log_step
     )
@@ -284,18 +298,26 @@ Available Routes:
    - Hyperbridge, JAM definitions
    - Dashboard information
    - Wiki pages, how-to guides, tutorials
-   - General "what is" or "how does" questions without specific data requests
+   - Governance-related "what is", "who is", "how does" questions (e.g., "Who is the most trustable delegate", "What is OpenGov", "What is a delegate")
+   - Questions asking for explanations, definitions, or conceptual information about governance/blockchain
    - "How to" questions about using Polkassembly features
    - Questions about processes, rules, or procedures
+   - Questions about delegates, delegation concepts, or how delegation works
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
    - Questions asking for specific proposal information (title, content, status, dates, network)
-   - Proposal metadata (type, proposer, beneficiary, amounts)
+   - Proposal metadata (type, proposer, beneficiary, amounts, curator)
+   - Questions about specific proposal IDs (e.g., "Who is the curator of 1671", "What is the status of proposal 123")
+   - Questions about blockchain addresses (e.g., "Who is 0x163830...", "What proposals did [address] make", "Show me proposals by [address]")
    - Voting data (voter information, voting power, decisions)
    - Proposal filtering by ID, dates, network, type, status
    - Aggregations, counts, or summaries of on-chain data
    - Questions asking to RETRIEVE or DISPLAY specific data from the blockchain
+   - Questions asking for specific delegate addresses, vote counts, or on-chain delegate metrics
+   - URLs to pages (e.g., "http://polkadot.polkassembly.io/referenda/1781" = very specific query for referenda 1781 on Polkadot)
+     * URLs contain specific proposal/referenda IDs and network information - these are HIGHLY SPECIFIC queries
+     * Extract the referenda/proposal ID and network from the URL (polkadot.polkassembly.io = Polkadot, kusama.polkassembly.io = Kusama)
 
 3. "hybrid" - For queries that need both static context and dynamic data:
    - Questions that require explaining concepts AND showing specific data
@@ -307,13 +329,15 @@ Available Routes:
    - Questions completely outside Polkadot/blockchain domain
    - Requests for general help or introduction
    - Ambiguous or unclear queries that can't be categorized
+   - General knowledge questions about people (e.g., "Who is Gavin Wood", "Who is Satoshi Nakamoto")
+   - Questions about individuals that require web search or general knowledge
 
 CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no text before or after. Just the JSON object.
 
 Example responses:
-{{"route": "static", "confidence": 0.9}}
-{{"route": "dynamic", "confidence": 0.85}}
-{{"route": "generic", "confidence": 0.7}}
+{{"route": "static", "confidence": 0.9}}  // e.g., "Who is the most trustable delegate", "What is OpenGov"
+{{"route": "dynamic", "confidence": 0.95}}  // e.g., "Show me proposals from last month", "Who is the curator of 1671", "Who is 0x163830...", "http://polkadot.polkassembly.io/referenda/1781"
+{{"route": "generic", "confidence": 0.7}}  // e.g., "Hello", "Hi there", "Who is Gavin Wood"
 
 Now respond with ONLY the JSON for this query:
 """
@@ -382,10 +406,17 @@ Now respond with ONLY the JSON for this query:
                 
                 query_lower = query.lower()
                 
-                dynamic_keywords = ['proposal', 'referendum', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'count', 'how many']
+                dynamic_keywords = ['proposal', 'referendum', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
+                static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition']
+                # Check for "who is" - if it's a person name (not governance concept), route to generic
+                is_person_query = query_lower.startswith('who is ') and len(query.split()) <= 4  # Simple heuristic: "who is [name]" is likely a person
+                governance_who_is = any(term in query_lower for term in ['delegate', 'curator', 'proposer', 'beneficiary', 'ambassador'])
+                
                 if any(keyword in query_lower for keyword in dynamic_keywords):
                     route = "dynamic"
-                elif any(phrase in query_lower for phrase in ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide']):
+                elif is_person_query and not governance_who_is:
+                    route = "generic"  # "Who is [person name]" -> generic for web search
+                elif any(phrase in query_lower for phrase in static_keywords) or (query_lower.startswith('who is ') and governance_who_is):
                     route = "static"
                 elif any(word in query_lower for word in ['hi', 'hello', 'hey', 'greetings']):
                     route = "generic"

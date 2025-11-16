@@ -792,6 +792,13 @@ class Query2SQL:
                 - The formatting is already applied based on assetId rules in Python
             - CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
             
+            PROPOSAL TYPE CONTEXT:
+            - ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators
+            - If a user asks about curator for a ReferendumV2 proposal, explain: "ReferendumV2 proposals do not have curators. Only Bounties and ChildBounties use curators to manage the bounty process."
+            - If a user asks about curator for a Bounty/ChildBounty and it's null, explain: "This bounty does not have a curator assigned yet."
+            - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
+            - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
+            
             - If you are providing any info on proposal with title, use the automatically generated proposal links:
                 - Use 'proposal_link' field for the URL
                 - Use 'proposal_link_display' field for markdown formatted link with title
@@ -819,7 +826,7 @@ class Query2SQL:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information. Always show actual data requested - addresses, proposal IDs, titles, amounts, etc. You work with ACTUAL retrieved data from the blockchain database, so always provide the information regardless of dates mentioned in queries. Combine information from multiple queries to provide comprehensive answers. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."},
+                    {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information. Always show actual data requested - addresses, proposal IDs, titles, amounts, etc. You work with ACTUAL retrieved data from the blockchain database, so always provide the information regardless of dates mentioned in queries. Combine information from multiple queries to provide comprehensive answers. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely. IMPORTANT: ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators. If asked about curator for ReferendumV2, explain that this proposal type doesn't use curators."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
@@ -968,6 +975,13 @@ class Query2SQL:
                 - Use 'amount_display' for user-friendly display with currency symbols
                 - The formatting is already applied based on assetId rules in Python
             - CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
+            
+            PROPOSAL TYPE CONTEXT:
+            - ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators
+            - If a user asks about curator for a ReferendumV2 proposal, explain: "ReferendumV2 proposals do not have curators. Only Bounties and ChildBounties use curators to manage the bounty process."
+            - If a user asks about curator for a Bounty/ChildBounty and it's null, explain: "This bounty does not have a curator assigned yet."
+            - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
+            - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
 
             Focus on providing accurate, specific information from the query results. The data has been successfully retrieved from the blockchain database.
             """
@@ -1014,7 +1028,7 @@ class Query2SQL:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information including addresses, proposal IDs, and transaction details. Always show the actual data requested - never refuse due to privacy concerns as this is all public information. Provide clear, helpful explanations with actual values, addresses, and details from the results. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."},
+                    {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information including addresses, proposal IDs, and transaction details. Always show the actual data requested - never refuse due to privacy concerns as this is all public information. Provide clear, helpful explanations with actual values, addresses, and details from the results. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely. IMPORTANT: ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators. If asked about curator for ReferendumV2, explain that this proposal type doesn't use curators."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
@@ -1244,9 +1258,31 @@ class Query2SQL:
 CONVERSATION CONTEXT:
 Conversation history:
 {history_text}
-- If current query is a follow-up: Generate SQL that builds upon or references previous context
-- If current query is standalone: Generate SQL independently
-- Use your judgment to determine query relationships
+
+CRITICAL: URL HANDLING:
+- If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), extract the referenda/proposal ID and network:
+  * polkadot.polkassembly.io/referenda/1781 → referenda 1781 on Polkadot network
+  * kusama.polkassembly.io/referenda/123 → referenda 123 on Kusama network
+  * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
+- Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
+- URLs are HIGHLY SPECIFIC queries - no clarification needed
+
+CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
+- If the conversation history shows a pattern like:
+  1. User: [original question]
+  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
+  3. User: [short response like "polkadot", "kusama", "both"]
+- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
+- You MUST combine the original question (from message 1) with the clarification response (from message 3)
+- Examples:
+  * Original: "show me proposals" + Response: "polkadot" → "show me proposals on Polkadot network"
+  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
+  * Original: "summarize novawallet proposals" + Response: "polkadot" → "summarize novawallet proposals on Polkadot network"
+- Generate SQL based on the COMBINED understanding, not just the short clarification response
+
+If current query is a follow-up: Generate SQL that builds upon or references previous context
+If current query is standalone: Generate SQL independently
+Use your judgment to determine query relationships
 
 
 DATABASE SCHEMA:
@@ -1392,9 +1428,31 @@ DATABASE SCHEMA:
 CONVERSATION CONTEXT:
 Conversation history:
 {history_text}
-- If current query is a follow-up: Generate SQL that builds upon or references previous context
-- If current query is standalone: Generate SQL independently
-- Use your judgment to determine query relationships
+
+CRITICAL: URL HANDLING:
+- If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), extract the referenda/proposal ID and network:
+  * polkadot.polkassembly.io/referenda/1781 → referenda 1781 on Polkadot network
+  * kusama.polkassembly.io/referenda/123 → referenda 123 on Kusama network
+  * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
+- Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
+- URLs are HIGHLY SPECIFIC queries - no clarification needed
+
+CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
+- If the conversation history shows a pattern like:
+  1. User: [original question]
+  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
+  3. User: [short response like "polkadot", "kusama", "both"]
+- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
+- You MUST combine the original question (from message 1) with the clarification response (from message 3)
+- Examples:
+  * Original: "show me proposals" + Response: "polkadot" → "show me proposals on Polkadot network"
+  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
+  * Original: "summarize novawallet proposals" + Response: "polkadot" → "summarize novawallet proposals on Polkadot network"
+- Generate SQL based on the COMBINED understanding, not just the short clarification response
+
+If current query is a follow-up: Generate SQL that builds upon or references previous context
+If current query is standalone: Generate SQL independently
+Use your judgment to determine query relationships
 
 
 DATABASE SCHEMA:
@@ -1478,6 +1536,7 @@ DATABASE SCHEMA:
             
             EXAMPLE QUERIES:
             Single Query Examples:
+             - "http://polkadot.polkassembly.io/referenda/1781" or "polkadot.polkassembly.io/referenda/1781" -> SELECT "index", "title", "onchaininfo_status", "createdat", "content", "source_network", "source_proposal_type", "onchaininfo_proposer", "onchaininfo_reward", "onchaininfo_beneficiaries_0_amount", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "index" = 1781 AND "source_network" = 'polkadot' AND "index" IS NOT NULL AND "source_network" IS NOT NULL;
              - "Show me recent proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
              - "Find Kusama proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_network" = 'kusama' AND "source_network" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
              - "What treasury proposals exist?" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_proposal_type" ILIKE '%treasury%' AND "source_proposal_type" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
@@ -1491,10 +1550,12 @@ DATABASE SCHEMA:
              - "Count total proposals" -> SELECT COUNT(*) as total_proposals FROM {self.table_name};
              - "Show me proposal amounts" -> SELECT "title", "onchaininfo_beneficiaries_0_assetid", "index", "onchaininfo_beneficiaries_0_amount", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL AND "onchaininfo_beneficiaries_0_amount" != 'NaN' ORDER BY "createdat" DESC LIMIT 10;
              - "Show me all proposals ordered by date" -> SELECT "title", "index", "onchaininfo_status", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} ORDER BY "createdat" DESC NULLS LAST LIMIT 10;
+             - "Who is 0x163830..." or "What proposals did [address] make" -> Search across all address fields using ILIKE with partial match. Extract the address portion from query (e.g., "163830" from "0x163830...ah6") and search: SELECT "title", "index", "onchaininfo_proposer", "onchaininfo_status", "source_proposal_type", "createdat", "publicuser_username", "onchaininfo_beneficiaries_0_address", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("onchaininfo_proposer" ILIKE '%163830%' AND "onchaininfo_proposer" IS NOT NULL) OR ("onchaininfo_beneficiaries_0_address" ILIKE '%163830%' AND "onchaininfo_beneficiaries_0_address" IS NOT NULL) OR ("publicuser_addresses_0" ILIKE '%163830%' AND "publicuser_addresses_0" IS NOT NULL) OR ("publicuser_addresses_1" ILIKE '%163830%' AND "publicuser_addresses_1" IS NOT NULL) OR ("publicuser_addresses_2" ILIKE '%163830%' AND "publicuser_addresses_2" IS NOT NULL) OR ("publicuser_addresses_3" ILIKE '%163830%' AND "publicuser_addresses_3" IS NOT NULL) OR ("publicuser_addresses_4" ILIKE '%163830%' AND "publicuser_addresses_4" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
             
             Multiple Query Examples:
             - "How many proposals in August 2025 and name a few?" -> ["SELECT COUNT(*) as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL;", "SELECT \"title\", \"index\", \"onchaininfo_status\", \"createdat\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL ORDER BY \"createdat\" DESC LIMIT 10;"]
             - "How many Kusama proposals exist and show some examples?" -> ["SELECT COUNT(*) as kusama_count FROM {self.table_name} WHERE \"source_network\" = 'kusama' AND \"source_network\" IS NOT NULL;", "SELECT \"title\", \"index\", \"onchaininfo_status\", \"createdat\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE \"source_network\" = 'kusama' AND \"source_network\" IS NOT NULL ORDER BY \"createdat\" DESC LIMIT 10;"]
+            - "Summarize how many proposals has novawallet made till date and how much have they taken till date. Show me all the details" -> ["SELECT COUNT(*) AS total_proposals, SUM(CASE WHEN \"onchaininfo_reward\" IS NOT NULL AND \"onchaininfo_reward\" != 'NaN' THEN CAST(\"onchaininfo_reward\" AS FLOAT) WHEN \"onchaininfo_beneficiaries_0_amount\" IS NOT NULL AND \"onchaininfo_beneficiaries_0_amount\" != 'NaN' THEN CAST(\"onchaininfo_beneficiaries_0_amount\" AS FLOAT) ELSE 0 END) AS total_amount_received FROM {self.table_name} WHERE (\"title\" ILIKE '%novawallet%' OR \"content\" ILIKE '%novawallet%') AND \"title\" IS NOT NULL AND \"content\" IS NOT NULL;", "SELECT \"index\", \"title\", \"onchaininfo_status\", \"createdat\", \"source_network\", \"source_proposal_type\", COALESCE(\"onchaininfo_reward\", \"onchaininfo_beneficiaries_0_amount\") AS amount, \"onchaininfo_beneficiaries_0_assetid\" AS asset_id, \"onchaininfo_proposer\", \"onchaininfo_beneficiaries_0_address\" AS beneficiary_address, \"content\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE (\"title\" ILIKE '%novawallet%' OR \"content\" ILIKE '%novawallet%') AND \"title\" IS NOT NULL AND \"content\" IS NOT NULL AND \"createdat\" IS NOT NULL ORDER BY \"createdat\" DESC;"]
             
             Null Results
             - Some columns has NULL and NaN values and for some queries like 
@@ -2383,9 +2444,37 @@ SQL Query:
     def _generate_and_execute_voting_with_retry(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> Tuple[List[str], List[Tuple[List[List[Any]], List[str]]]]:
         """Generate SQL queries and execute them with error correction and retry mechanism for voting data"""
         
+        # Format conversation history for SQL generation
+        history_text = "No previous conversation"
+        if conversation_history:
+            history_parts = []
+            for i, msg in enumerate(conversation_history, 1):
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")
+                if content:
+                    history_parts.append(f"{i}. {role}: {content[:150]}")
+            if history_parts:
+                history_text = "\n".join(history_parts)
+        
         # Base system prompt for voting data
         base_system_prompt = f"""
 You are a PostgreSQL expert specializing in voting data analysis. Convert natural language queries into optimized SQL queries for voting data.
+
+CONVERSATION CONTEXT:
+Conversation history:
+{history_text}
+
+CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
+- If the conversation history shows a pattern like:
+  1. User: [original question]
+  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
+  3. User: [short response like "polkadot", "kusama", "both"]
+- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
+- You MUST combine the original question (from message 1) with the clarification response (from message 3)
+- Examples:
+  * Original: "show me votes" + Response: "polkadot" → "show me votes on Polkadot network"
+  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
+- Generate SQL based on the COMBINED understanding, not just the short clarification response
 
 DATABASE SCHEMA:
 Main Table: {self.table_name}
@@ -2476,11 +2565,14 @@ Single Query Examples:
      ORDER BY main."created_at" DESC
      LIMIT 10;
 
-- "How many voters in July 2025?"
-  -> SELECT COUNT(DISTINCT main."voter") AS unique_voters
+
+- "How many unique voters were there in November 2025?"
+  -> SELECT COUNT(DISTINCT main."voter") AS unique_voters_count
      FROM {self.table_name} AS main
-     WHERE main."created_at" IS NOT NULL AND main."voter" IS NOT NULL
-       AND DATE_TRUNC('month', main."created_at") = '2025-07-01';
+     WHERE main."voter" IS NOT NULL 
+       AND main."created_at" IS NOT NULL 
+       AND main."created_at" >= '2025-11-01' 
+       AND main."created_at" < '2025-12-01';
 
 - "Voters with more than 1000 DOT voting power"
   -> SELECT main."voter", cv."self_voting_power", COUNT(*) OVER() as total_count
