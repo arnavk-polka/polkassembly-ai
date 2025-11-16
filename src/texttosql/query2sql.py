@@ -1389,6 +1389,17 @@ DATABASE SCHEMA:
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
                     
+                    normalized_queries = []
+                    for q in sql_queries:
+                        if isinstance(q, dict):
+                            if 'query' in q:
+                                normalized_queries.append(q['query'])
+                            else:
+                                normalized_queries.append(str(q))
+                        else:
+                            normalized_queries.append(str(q))
+                    sql_queries = normalized_queries
+                    
                     logger.info(f"Generated {len(sql_queries)} SQL queries (attempt {attempt + 1}): {sql_queries}")
                     return sql_queries
                     
@@ -1638,6 +1649,18 @@ Generate the corrected SQL queries as a JSON array:
                         sql_queries = [sql_queries]
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
+                    
+                    # Normalize: extract 'query' field from dicts if present
+                    normalized_queries = []
+                    for q in sql_queries:
+                        if isinstance(q, dict):
+                            if 'query' in q:
+                                normalized_queries.append(q['query'])
+                            else:
+                                normalized_queries.append(str(q))
+                        else:
+                            normalized_queries.append(str(q))
+                    sql_queries = normalized_queries
                         
                     logger.info(f"Generated {len(sql_queries)} SQL queries (attempt {attempt + 1}): {sql_queries}")
                     
@@ -1707,6 +1730,18 @@ Generate the corrected SQL queries as a JSON array:
                                 sql_queries = [sql_queries]
                             elif not isinstance(sql_queries, list):
                                 sql_queries = [str(sql_queries)]
+                            
+                            # Normalize: extract 'query' field from dicts if present
+                            normalized_queries = []
+                            for q in sql_queries:
+                                if isinstance(q, dict):
+                                    if 'query' in q:
+                                        normalized_queries.append(q['query'])
+                                    else:
+                                        normalized_queries.append(str(q))
+                                else:
+                                    normalized_queries.append(str(q))
+                            sql_queries = normalized_queries
                                 
                             logger.info(f"Generated {len(sql_queries)} SQL queries with fallback model: {sql_queries}")
                             
@@ -2302,6 +2337,18 @@ SQL Query:
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
                     
+                    # Normalize: extract 'query' field from dicts if present
+                    normalized_queries = []
+                    for q in sql_queries:
+                        if isinstance(q, dict):
+                            if 'query' in q:
+                                normalized_queries.append(q['query'])
+                            else:
+                                normalized_queries.append(str(q))
+                        else:
+                            normalized_queries.append(str(q))
+                    sql_queries = normalized_queries
+                    
                     logger.info(f"Generated {len(sql_queries)} SQL queries for voting (attempt {attempt + 1}): {sql_queries}")
                     return sql_queries
                     
@@ -2692,6 +2739,18 @@ Generate the corrected SQL queries as a JSON array:
                         sql_queries = [sql_queries]
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
+                    
+                    # Normalize: extract 'query' field from dicts if present
+                    normalized_queries = []
+                    for q in sql_queries:
+                        if isinstance(q, dict):
+                            if 'query' in q:
+                                normalized_queries.append(q['query'])
+                            else:
+                                normalized_queries.append(str(q))
+                        else:
+                            normalized_queries.append(str(q))
+                    sql_queries = normalized_queries
                         
                     logger.info(f"Generated {len(sql_queries)} SQL queries for voting data (attempt {attempt + 1}): {sql_queries}")
                     
@@ -2761,6 +2820,18 @@ Generate the corrected SQL queries as a JSON array:
                                 sql_queries = [sql_queries]
                             elif not isinstance(sql_queries, list):
                                 sql_queries = [str(sql_queries)]
+                            
+                            # Normalize: extract 'query' field from dicts if present
+                            normalized_queries = []
+                            for q in sql_queries:
+                                if isinstance(q, dict):
+                                    if 'query' in q:
+                                        normalized_queries.append(q['query'])
+                                    else:
+                                        normalized_queries.append(str(q))
+                                else:
+                                    normalized_queries.append(str(q))
+                            sql_queries = normalized_queries
                                 
                             logger.info(f"Generated {len(sql_queries)} SQL queries for voting data with fallback model: {sql_queries}")
                             

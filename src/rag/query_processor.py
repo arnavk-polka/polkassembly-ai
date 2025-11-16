@@ -941,6 +941,7 @@ async def processUserQuery(
             sql_queries = qa_result.get('sql_query', [])
             sql_has_network_filter = False
             sql_has_both_networks = False
+            is_aggregate_query = False
             if sql_queries:
                 if isinstance(sql_queries, list):
                     sql_query_str = ' '.join(sql_queries).lower()
@@ -949,6 +950,9 @@ async def processUserQuery(
                 sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
                 # Check if SQL explicitly filters for both networks
                 sql_has_both_networks = 'source_network' in sql_query_str and 'polkadot' in sql_query_str and 'kusama' in sql_query_str
+                # Check if SQL contains aggregate functions (COUNT, SUM, AVG, MAX, MIN)
+                # Aggregate queries are asking for summary statistics, so it's reasonable to return data from both networks
+                is_aggregate_query = any(func in sql_query_str for func in ['count(', 'sum(', 'avg(', 'max(', 'min(', 'count(*)'])
             
             # Check if results contain multiple networks (indicating no network filter was applied)
             # This is a proxy check - if SQL didn't filter by network, results likely contain both
@@ -962,11 +966,13 @@ async def processUserQuery(
             # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
             # 3. SQL got results
             # NOT ambiguous if: user asked for both networks and SQL has both networks
+            # NOT ambiguous if: SQL is an aggregate query (COUNT, SUM, etc.) - aggregate queries are fine without network specification
             is_ambiguous_query = (
                 not has_network_specified and 
                 (sql_has_network_filter or results_have_multiple_networks) and
                 qa_result.get('success', False) and 
-                qa_result.get('result_count', 0) > 0
+                qa_result.get('result_count', 0) > 0 and
+                not is_aggregate_query
             ) and not (explicitly_both_networks and sql_has_both_networks)
             
             if is_ambiguous_query:
