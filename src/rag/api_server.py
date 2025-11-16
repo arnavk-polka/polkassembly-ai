@@ -148,6 +148,7 @@ class ConversationMessage(BaseModel):
     query: str = Field(..., description="Previous user query")
     response: str = Field(..., description="Previous AI response")
     timestamp: str = Field(..., description="ISO timestamp of the message")
+    original_answer: Optional[str] = Field(default=None, description="Original answer with markers for conversation history")
 
 class QueryRequest(BaseModel):
     question: str = Field(..., description="The question to ask", min_length=1, max_length=500)
@@ -277,7 +278,8 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 {
                     'query': msg.query,
                     'response': msg.response,
-                    'timestamp': msg.timestamp
+                    'timestamp': msg.timestamp,
+                    'original_answer': msg.original_answer if hasattr(msg, 'original_answer') and msg.original_answer else None
                 }
                 for msg in request.conversation_history
             ]

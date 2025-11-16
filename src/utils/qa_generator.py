@@ -450,6 +450,37 @@ No explanations, no markdown, just the JSON."""
                 logger.warning("Analyzed query is empty, returning original")
                 return query
             
+            # Critical validation: reject if analyzed query contains clarification question patterns
+            # This prevents the LLM from prepending clarification questions from history
+            analyzed_lower = analyzed_query.lower().strip()
+            clarification_patterns = [
+                'are you referring to',
+                'are you looking for',
+                'are you asking about',
+                'can you clarify',
+                'which network',
+                'polkadot or kusama',
+                'which proposal',
+                'which referendum'
+            ]
+            
+            # Check if analyzed query starts with a clarification question
+            starts_with_clarification = any(analyzed_lower.startswith(pattern) for pattern in clarification_patterns)
+            
+            # Also check if it contains a clarification question followed by the original query
+            contains_clarification_prefix = False
+            for pattern in clarification_patterns:
+                if pattern in analyzed_lower:
+                    # Check if original query appears after the clarification
+                    original_in_analyzed = query.lower().strip() in analyzed_lower
+                    if original_in_analyzed and analyzed_lower.index(pattern) < analyzed_lower.index(query.lower().strip()):
+                        contains_clarification_prefix = True
+                        break
+            
+            if starts_with_clarification or contains_clarification_prefix:
+                logger.warning(f"Analyzed query contains clarification question pattern, returning original. Analyzed: '{analyzed_query[:100]}'")
+                return query
+            
             # Log only if query was actually modified
             if analyzed_query.lower().strip() != query.lower().strip():
                 logger.info(f"Query modified: '{query}' → '{analyzed_query}'")

@@ -1255,14 +1255,18 @@ DATABASE SCHEMA:
             13. For text searches: ALWAYS add IS NOT NULL for the column being searched
             14. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "createdat" requires "createdat" IS NOT NULL)
             15. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered
-            16. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
+            16. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL
+            17. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
             
             MANDATORY NULL HANDLING RULES:
             - If you use a column in WHERE clause: add "column_name IS NOT NULL"
             - If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
             - If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
             - If you use a column in HAVING clause: add "column_name IS NOT NULL"
-            - This applies to ALL columns, not just specific ones
+            - CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
+            - If a user asks for a specific field value (e.g., "who is the curator"), return the row even if that field is NULL
+            - The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
+            - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
             - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
 
             NaN VALUE HANDLING:
@@ -1386,14 +1390,18 @@ DATABASE SCHEMA:
             13. For text searches: ALWAYS add IS NOT NULL for the column being searched
             14. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "createdat" requires "createdat" IS NOT NULL)
             15. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered
-            16. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
+            16. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL
+            17. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
             
             MANDATORY NULL HANDLING RULES:
             - If you use a column in WHERE clause: add "column_name IS NOT NULL"
             - If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
             - If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
             - If you use a column in HAVING clause: add "column_name IS NOT NULL"
-            - This applies to ALL columns, not just specific ones
+            - CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
+            - If a user asks for a specific field value (e.g., "who is the curator"), return the row even if that field is NULL
+            - The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
+            - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
             - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
 
             NaN VALUE HANDLING:
@@ -2161,6 +2169,7 @@ CRITICAL NULL VALUE HANDLING:
 21. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "created_at" requires "created_at" IS NOT NULL).
 22. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered.
 23. When filtering by proposal or voter: ALWAYS add "main.proposal_index IS NOT NULL" and/or "main.voter IS NOT NULL".
+24. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL.
 
 MULTIPLE QUERIES STRATEGY:
 - If the user asks for COUNT and EXAMPLES (e.g., "how many voters and show some"), return 2 queries:
@@ -2379,13 +2388,16 @@ CRITICAL NULL VALUE HANDLING:
 21. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "created_at" requires "created_at" IS NOT NULL).
 22. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered.
 23. When filtering by proposal or voter: ALWAYS add "main.proposal_index IS NOT NULL" and/or "main.voter IS NOT NULL".
+24. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL.
 
 MANDATORY NULL HANDLING RULES FOR VOTING DATA:
 - If you use a column in WHERE clause: add "column_name IS NOT NULL"
 - If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
 - If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
 - If you use a column in HAVING clause: add "column_name IS NOT NULL"
-- This applies to ALL columns, not just specific ones
+- CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
+- If a user asks for a specific field value, return the row even if that field is NULL
+- The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
 - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
 
 MULTIPLE QUERIES STRATEGY:

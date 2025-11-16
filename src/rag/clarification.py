@@ -54,11 +54,12 @@ This is a static/educational query. Common ambiguities include:
 - Specific topic or concept within the broader subject
 - Level of detail needed (overview vs deep dive)
 - Specific use case or scenario
+- Unclear terminology or acronyms
 """
     elif route == "hybrid":
         route_context = """
 This is a hybrid query needing both explanation and data. Common ambiguities include:
-- Network selection (Polkadot vs Kusama) for the data portion
+- Network selection (Polkadot or Kusama) for the data portion
 - Scope of explanation vs data requested
 """
     
@@ -73,21 +74,26 @@ This query was routed to the "{route}" category. The query is ambiguous and need
 {route_context}
 
 CRITICAL INSTRUCTIONS:
+- Analyze the query type FIRST:
+  * If it's asking "what is X" or "explain X" or defining a term/concept → Ask what they mean by that term (e.g., "Can you explain what you mean by that?" or "What specifically are you referring to?")
+  * If it's asking for data/listings (show, list, find, get) → Ask which network (Polkadot or Kusama) if not specified
+  * If it's asking about votes without ID → Ask which specific proposal/referendum
 - You MUST ask ONE specific clarifying question based on the EXACT terms used in the user's query
-- DO NOT use generic phrases like "Could you please provide more details" or "What specific information"
-- Be DIRECT and SPECIFIC - use the SAME terminology the user used (e.g., if they said "referenda", say "referenda", not "proposals")
+- DO NOT default to network questions for concept/definition queries
+- Be DIRECT and SPECIFIC - use the SAME terminology the user used
 - Match the query's language and terminology exactly
-- For queries about governance data (proposals, referenda, votes, treasury, bounties) without network specification: Ask which network (Polkadot or Kusama)
-- For queries about votes without proposal/referendum ID: Ask which specific proposal/referendum
 - Be natural and conversational
 
 EXAMPLES:
+- Query: "what is pop" → Response: "Can you explain what you mean by that? Are you referring to a specific term or concept?"
+- Query: "what is XCM" → Response: "Can you clarify what you're asking about? Are you looking for an explanation of XCM?"
 - Query: "show me proposals" → Response: "Are you looking for proposals on Polkadot or Kusama network?"
 - Query: "show me active referenda" → Response: "Are you looking for referenda on Polkadot or Kusama network?"
 - Query: "list referenda" → Response: "Are you looking for referenda on Polkadot or Kusama network?"
 - Query: "what are the votes" → Response: "Which proposal or referendum are you asking about? Please provide the ID or title."
 - Query: "treasury data" → Response: "Are you asking about Polkadot or Kusama treasury proposals?"
 - Query: "show me bounties" → Response: "Are you looking for bounties on Polkadot or Kusama network?"
+- Query: "explain governance" → Response: "What specific aspect of governance would you like me to explain?"
 
 Now, for the query "{query}", respond with ONLY the clarifying question (no explanations, no extra text). Use the exact same terminology the user used:
 """

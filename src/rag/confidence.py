@@ -219,12 +219,26 @@ async def compute_retrieval_confidence(
                     is_polkassembly_docs = True
                     break
         
-        static_confidence = (
-            0.30 * router_confidence +
-            0.40 * semantic_completeness +
-            0.20 * static_similarity +
-            0.10 * chunk_count_factor
-        )
+        # Adjust weights based on chunk quality
+        # If we have good chunks, reduce semantic_completeness weight and increase similarity weight
+        has_good_chunks = static_chunks and len(static_chunks) > 0 and static_similarity >= 0.45
+        
+        if has_good_chunks:
+            # When chunks are found with decent similarity, trust the chunks more
+            static_confidence = (
+                0.30 * router_confidence +
+                0.25 * semantic_completeness +  # Fixed at 25%
+                0.30 * static_similarity +      # Increased from 0.20
+                0.15 * chunk_count_factor      # Increased from 0.10
+            )
+        else:
+            # Default weights when no good chunks
+            static_confidence = (
+                0.30 * router_confidence +
+                0.25 * semantic_completeness +  # Fixed at 25%
+                0.30 * static_similarity +      # Increased from 0.20
+                0.15 * chunk_count_factor       # Increased from 0.10
+            )
         
         # Polkassembly docs bonus: if using Polkassembly docs chunks, boost confidence significantly
         polkassembly_docs_bonus = 0.0
@@ -239,6 +253,12 @@ async def compute_retrieval_confidence(
             # Only apply if not already using Polkassembly docs (which has its own bonus)
             high_similarity_bonus = 0.3
         
+        # Medium similarity bonus: if chunks exist with medium similarity (0.5-0.6), give small bonus
+        medium_similarity_bonus = 0.0
+        if static_chunks and len(static_chunks) > 0 and 0.5 <= static_similarity < 0.6 and not is_polkassembly_docs:
+            # Medium similarity chunks found - small bonus to help reach threshold
+            medium_similarity_bonus = 0.15
+        
         ambiguity_penalty = 0.0
         if semantic_completeness < 0.45:
             # Only apply penalty if no chunks found or chunks have low similarity
@@ -248,17 +268,23 @@ async def compute_retrieval_confidence(
             elif is_polkassembly_docs:
                 # Polkassembly docs chunks - no penalty (bonus handles it)
                 ambiguity_penalty = 0.0
-            elif static_similarity < 0.5:
+            elif static_similarity < 0.40:
                 # Low similarity chunks - moderate penalty
                 ambiguity_penalty = -0.2
             elif static_similarity >= 0.6:
                 # Good similarity chunks - no penalty (bonus handles it)
                 ambiguity_penalty = 0.0
+            elif static_similarity >= 0.5:
+                # Medium similarity (0.5-0.6) - small penalty since we have medium_similarity_bonus
+                ambiguity_penalty = -0.05
+            elif static_similarity >= 0.45:
+                # Medium similarity (0.45-0.5) - small penalty since we're using adjusted weights
+                ambiguity_penalty = -0.05
             else:
-                # Medium similarity - moderate penalty
+                # Should not reach here, but keep for safety
                 ambiguity_penalty = -0.15
         
-        final_static_confidence = static_confidence + polkassembly_docs_bonus + high_similarity_bonus + ambiguity_penalty
+        final_static_confidence = static_confidence + polkassembly_docs_bonus + high_similarity_bonus + medium_similarity_bonus + ambiguity_penalty
         
         return (max(0.0, min(1.0, final_static_confidence)), semantic_completeness)
     

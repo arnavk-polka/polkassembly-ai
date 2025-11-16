@@ -60,7 +60,7 @@ Search the internet and provide the best answer you can:
                         "sources_count": len(sources)
                     })
                     
-                    formatted_answer = f"We do not have direct data for this in our system. Here is the best answer I found on the internet:\n\n{answer}"
+                    formatted_answer = answer
                     
                     follow_up_questions = [
                         "How does Polkadot's governance system work?",
@@ -110,7 +110,7 @@ Provide the best answer you can:
             
             response = qa_generator.gemini_client.get_response(llm_prompt)
             
-            formatted_answer = f"We do not have direct data for this in our system. Here is the best answer I found on the internet:\n\n{response.strip()}"
+            formatted_answer = response.strip()
             
             log_step("internet_fallback_complete", {
                 "response_length": len(formatted_answer)
@@ -147,7 +147,7 @@ You help users with questions even when you don't have specific data in your sys
                 )
                 answer = response.choices[0].message.content
                 
-                formatted_answer = f"We do not have direct data for this in our system. Here is the best answer I found on the internet:\n\n{answer.strip()}"
+                formatted_answer = answer.strip()
                 
                 return {
                     'answer': formatted_answer,

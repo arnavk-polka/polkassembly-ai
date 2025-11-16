@@ -168,14 +168,18 @@ async def detect_and_handle_clarification_response(
     # Handle both Pydantic models and dicts
     last_response = None
     if hasattr(last_entry, 'response'):
-        last_response = last_entry.response.strip()
+        # Check original_answer first if available (it has the marker)
+        if hasattr(last_entry, 'original_answer') and last_entry.original_answer:
+            last_response = last_entry.original_answer.strip()
+        else:
+            last_response = last_entry.response.strip()
     elif isinstance(last_entry, dict):
-        last_response = last_entry.get('response', '').strip()
-        # Also check original_answer field if response doesn't have marker
-        if last_response and '<!--CLARIFICATION_MARKER:' not in last_response:
-            original_answer = last_entry.get('original_answer', '')
-            if original_answer and '<!--CLARIFICATION_MARKER:' in original_answer:
-                last_response = original_answer.strip()
+        # Check original_answer first if available (it has the marker)
+        original_answer = last_entry.get('original_answer', '')
+        if original_answer and '<!--CLARIFICATION_MARKER:' in original_answer:
+            last_response = original_answer.strip()
+        else:
+            last_response = last_entry.get('response', '').strip()
     else:
         log_step("clarification_check_invalid_format", {"entry_type": str(type(last_entry))}, "debug")
         return None
@@ -186,8 +190,9 @@ async def detect_and_handle_clarification_response(
     
     log_step("clarification_check_scanning", {
         "last_response_preview": last_response[:200],
-        "user_message": userMessage[:100]
-    }, "debug")
+        "user_message": userMessage[:100],
+        "has_marker": '<!--CLARIFICATION_MARKER:' in last_response if last_response else False
+    }, "info")
     
     # Look for the embedded clarification marker
     # Try new format first: <!--CLARIFICATION_MARKER:base64_encoded_query|route|router_confidence-->
@@ -388,7 +393,9 @@ You are a query router. Analyze this user query and determine the best route for
 Query: "{query}"{conversation_context}
 
 Available Routes:
-1. "static" - For general educational/informational topics:
+1. "static" - For procedural, educational, or informational questions:
+   - Questions about what you CAN or CANNOT do (e.g., "can I cancel", "is it possible to", "can I still")
+   - Questions about HOW to do something (e.g., "how to cancel", "how do I", "how can I")
    - Governance/OpenGov concepts and explanations
    - Ambassador Programme information
    - Parachains & AnV explanations
@@ -397,15 +404,16 @@ Available Routes:
    - Wiki pages, how-to guides, tutorials
    - General "what is" or "how does" questions without specific data requests
    - "How to" questions about using Polkassembly features
+   - Questions about processes, rules, or procedures
 
-2. "dynamic" - For blockchain data queries requiring on-chain data:
-   - Proposal information (title, content, status, dates, network)
+2. "dynamic" - For queries requesting specific on-chain DATA:
+   - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
+   - Questions asking for specific proposal information (title, content, status, dates, network)
    - Proposal metadata (type, proposer, beneficiary, amounts)
    - Voting data (voter information, voting power, decisions)
    - Proposal filtering by ID, dates, network, type, status
    - Aggregations, counts, or summaries of on-chain data
-   - Keywords: "proposal", "referendum", "bounty", "treasury", "voter", "vote"
-   - Questions asking for specific data from the blockchain
+   - Questions asking to RETRIEVE or DISPLAY specific data from the blockchain
 
 3. "hybrid" - For queries that need both static context and dynamic data:
    - Questions that require explaining concepts AND showing specific data
@@ -593,7 +601,9 @@ async def processUserQuery(
         
         # Analyze query with memory FIRST, then route on the analyzed query
         # Use combined query if this is a clarification followup, otherwise use original
-        if not is_clarification_followup:
+        if is_clarification_followup:
+            analyzed_query = combined_query
+        else:
             analyzed_query = userMessage
         
         if conversationHistory and qa_generator and not is_clarification_followup:
@@ -681,7 +691,7 @@ async def processUserQuery(
             
             # Decision logic for static route
             decision = None
-            if final_static_confidence >= 0.65:
+            if final_static_confidence >= 0.45:
                 decision = "ANSWER"
                 qa_result = await qa_generator.generate_answer(
                     query=analyzed_query,
@@ -708,7 +718,7 @@ async def processUserQuery(
                     "search_method": qa_result.get('search_method', 'unknown'),
                     "retrieval_confidence": retrieval_confidence
                 })
-            elif 0.35 <= final_static_confidence < 0.65:
+            elif 0.35 <= final_static_confidence < 0.45:
                 decision = "AMBIGUITY_FLOW"
                 if not is_clarification_followup:
                     log_step("static_confidence_decision", {
@@ -996,18 +1006,36 @@ async def processUserQuery(
             
             # Check if query is ambiguous (missing network specification)
             # Ambiguous if: user didn't specify network AND (SQL filtered by network OR SQL returned both networks)
+            # Check both original and analyzed query for network mentions
             user_query_lower = userMessage.lower()
+            analyzed_query_lower = analyzed_query.lower()
+            
+            # Check for explicit network mentions
             has_network_in_user_query = any(network in user_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
+            has_network_in_analyzed = any(network in analyzed_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
+            
+            # Check if user explicitly asked for "both" networks
+            explicitly_both_networks = (
+                'both' in user_query_lower and 
+                ('polkadot' in user_query_lower or 'kusama' in user_query_lower) and
+                ('polkadot' in analyzed_query_lower or 'kusama' in analyzed_query_lower)
+            )
+            
+            # User specified network if it's in either query OR they explicitly asked for both
+            has_network_specified = has_network_in_user_query or has_network_in_analyzed or explicitly_both_networks
             
             # Check if SQL query contains network filter
             sql_queries = qa_result.get('sql_query', [])
             sql_has_network_filter = False
+            sql_has_both_networks = False
             if sql_queries:
                 if isinstance(sql_queries, list):
                     sql_query_str = ' '.join(sql_queries).lower()
                 else:
                     sql_query_str = str(sql_queries).lower()
                 sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
+                # Check if SQL explicitly filters for both networks
+                sql_has_both_networks = 'source_network' in sql_query_str and 'polkadot' in sql_query_str and 'kusama' in sql_query_str
             
             # Check if results contain multiple networks (indicating no network filter was applied)
             # This is a proxy check - if SQL didn't filter by network, results likely contain both
@@ -1017,15 +1045,16 @@ async def processUserQuery(
                 results_have_multiple_networks = not sql_has_network_filter
             
             # Query is ambiguous if:
-            # 1. User didn't specify network, AND
+            # 1. User didn't specify network (and didn't ask for both), AND
             # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
             # 3. SQL got results
+            # NOT ambiguous if: user asked for both networks and SQL has both networks
             is_ambiguous_query = (
-                not has_network_in_user_query and 
+                not has_network_specified and 
                 (sql_has_network_filter or results_have_multiple_networks) and
                 qa_result.get('success', False) and 
                 qa_result.get('result_count', 0) > 0
-            )
+            ) and not (explicitly_both_networks and sql_has_both_networks)
             
             if is_ambiguous_query:
                 log_step("ambiguous_query_detected", {
