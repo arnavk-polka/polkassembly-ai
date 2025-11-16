@@ -203,6 +203,22 @@ async def compute_retrieval_confidence(
         
         chunk_count_factor = min(len(static_chunks) / 5.0, 1.0) if static_chunks else 0.0
         
+        # Check if chunks are from Polkassembly docs (pa_docs)
+        is_polkassembly_docs = False
+        if static_chunks and len(static_chunks) > 0:
+            for chunk in static_chunks:
+                metadata = chunk.get('metadata', {})
+                source = metadata.get('source', '').lower() if metadata.get('source') else ''
+                title = metadata.get('title', '').lower() if metadata.get('title') else ''
+                # Check multiple fields to detect Polkassembly docs
+                if ('pa_docs' in source or 
+                    'pa_docs' in title or 
+                    'pa_docs' in str(metadata).lower() or
+                    metadata.get('doc_type', '').lower() == 'pa_docs' or
+                    metadata.get('source_type', '').lower() == 'pa_docs'):
+                    is_polkassembly_docs = True
+                    break
+        
         static_confidence = (
             0.30 * router_confidence +
             0.40 * semantic_completeness +
@@ -210,11 +226,39 @@ async def compute_retrieval_confidence(
             0.10 * chunk_count_factor
         )
         
+        # Polkassembly docs bonus: if using Polkassembly docs chunks, boost confidence significantly
+        polkassembly_docs_bonus = 0.0
+        if is_polkassembly_docs:
+            # Polkassembly docs chunks are preferred - boost confidence to ensure answer
+            polkassembly_docs_bonus = 0.3
+        
+        # High similarity bonus: if chunks exist with high similarity, boost confidence significantly
+        high_similarity_bonus = 0.0
+        if static_chunks and len(static_chunks) > 0 and static_similarity >= 0.6 and not is_polkassembly_docs:
+            # High similarity chunks found - boost confidence to ensure answer
+            # Only apply if not already using Polkassembly docs (which has its own bonus)
+            high_similarity_bonus = 0.3
+        
         ambiguity_penalty = 0.0
         if semantic_completeness < 0.45:
-            ambiguity_penalty = -0.4
+            # Only apply penalty if no chunks found or chunks have low similarity
+            # If we have good chunks, the query might be vague but we still have relevant data
+            if not static_chunks or len(static_chunks) == 0:
+                ambiguity_penalty = -0.4
+            elif is_polkassembly_docs:
+                # Polkassembly docs chunks - no penalty (bonus handles it)
+                ambiguity_penalty = 0.0
+            elif static_similarity < 0.5:
+                # Low similarity chunks - moderate penalty
+                ambiguity_penalty = -0.2
+            elif static_similarity >= 0.6:
+                # Good similarity chunks - no penalty (bonus handles it)
+                ambiguity_penalty = 0.0
+            else:
+                # Medium similarity - moderate penalty
+                ambiguity_penalty = -0.15
         
-        final_static_confidence = static_confidence + ambiguity_penalty
+        final_static_confidence = static_confidence + polkassembly_docs_bonus + high_similarity_bonus + ambiguity_penalty
         
         return (max(0.0, min(1.0, final_static_confidence)), semantic_completeness)
     

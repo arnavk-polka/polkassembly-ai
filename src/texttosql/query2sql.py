@@ -1159,30 +1159,59 @@ class Query2SQL:
         # Retrieve relevant governance proposals from Chroma as contextual examples
         governance_context = ""
         if self.embedding_manager:
+            logger.info("📊 Embedding manager available - will retrieve governance examples")
             try:
-                logger.info(f"Retrieving relevant governance proposals from Chroma for context...")
+                logger.info("=" * 70)
+                logger.info("🔍 SEMANTIC SEARCH FOR SQL CONTEXT")
+                logger.info("=" * 70)
+                logger.info(f"Query sent to Chroma: '{natural_query}'")
+                logger.info(f"Collection: polkadot_embeddings_dynamic")
+                logger.info(f"Filter: doc_type='governance'")
+                logger.info(f"Requesting: 3 results")
+                logger.info("=" * 70)
+                
                 results = self.embedding_manager.search_similar_chunks(
-                    query_text=natural_query,
+                    query=natural_query,
                     n_results=3,
-                    where={"doc_type": "governance"}
+                    filter_metadata={"doc_type": "governance"}
                 )
                 
                 if results and len(results) > 0:
+                    logger.info(f"✅ Found {len(results)} results from Chroma")
+                    logger.info("-" * 70)
+                    
                     context_parts = []
                     for i, chunk in enumerate(results[:3], 1):
                         content = chunk.get('content', '')
                         metadata = chunk.get('metadata', {})
                         network = metadata.get('network', 'unknown')
                         proposal_idx = metadata.get('proposal_index', 'unknown')
+                        proposal_type = metadata.get('proposal_type', 'unknown')
+                        
+                        logger.info(f"Result {i}:")
+                        logger.info(f"  Network: {network}")
+                        logger.info(f"  Proposal Index: {proposal_idx}")
+                        logger.info(f"  Proposal Type: {proposal_type}")
+                        logger.info(f"  Content Preview: {content[:150]}...")
+                        logger.info("-" * 70)
                         
                         context_parts.append(f"Example {i} (Proposal {network}#{proposal_idx}):\n{content[:500]}")
                     
                     governance_context = "\n\nRELEVANT GOVERNANCE PROPOSALS (for reference):\n" + "\n\n".join(context_parts) + "\n\nUse these examples to understand the data structure and write better SQL queries.\n"
-                    logger.info(f"Added {len(results[:3])} governance proposals as context for SQL generation")
+                    logger.info(f"✅ Added {len(results[:3])} governance proposals as context for SQL generation")
+                    logger.info("=" * 70)
                 else:
-                    logger.info("No relevant governance proposals found in Chroma")
+                    logger.info("❌ No relevant governance proposals found in Chroma")
+                    logger.info("=" * 70)
             except Exception as e:
-                logger.warning(f"Failed to retrieve governance context from Chroma: {e}")
+                logger.error("=" * 70)
+                logger.error("❌ SEMANTIC SEARCH FAILED")
+                logger.error(f"Error: {e}")
+                logger.error("=" * 70)
+                import traceback
+                logger.error(traceback.format_exc())
+        else:
+            logger.info("⚠️  No embedding manager - SQL generation without governance examples")
         
         base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries.
 

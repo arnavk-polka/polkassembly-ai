@@ -359,23 +359,38 @@ class QAGenerator:
             recent_history = conversation_history[-max_history_length:] if len(conversation_history) > max_history_length else conversation_history
             
             # Convert conversation history to serializable format
+            # Filter out clarification questions (assistant messages that are questions)
             serializable_history = []
             for msg in recent_history:
+                content = None
+                role = None
+                
                 if hasattr(msg, 'role') and hasattr(msg, 'content'):
-                    serializable_history.append({
-                        "role": msg.role,
-                        "content": msg.content
-                    })
+                    role = msg.role
+                    content = msg.content
                 elif isinstance(msg, dict):
-                    serializable_history.append({
-                        "role": msg.get("role", "user"),
-                        "content": msg.get("content", str(msg))
-                    })
+                    role = msg.get("role", "user")
+                    content = msg.get("content", str(msg))
                 else:
-                    serializable_history.append({
-                        "role": "user",
-                        "content": str(msg)
-                    })
+                    role = "user"
+                    content = str(msg)
+                
+                # Skip clarification questions (assistant messages that are questions)
+                # In this system, any assistant message that's a question is a clarification question
+                # These should not be used as context for query analysis
+                if role == "assistant" and content:
+                    content_str = str(content)
+                    # Remove CLARIFICATION_MARKER if present to check the actual question
+                    # The marker is embedded but we want to check the actual content
+                    content_without_marker = re.sub(r'<!--CLARIFICATION_MARKER:[^>]+-->', '', content_str).strip()
+                    # If it's a question (ends with '?'), skip it - it's a clarification question
+                    if content_without_marker.endswith('?'):
+                        continue  # Skip this message
+                
+                serializable_history.append({
+                    "role": role,
+                    "content": content
+                })
             
             # Improved prompt with better structure and examples
             analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries.
@@ -385,11 +400,17 @@ CONVERSATION HISTORY:
 
 CURRENT USER QUERY: "{query}"
 
+IMPORTANT: 
+- The CURRENT USER QUERY above is the actual query you should analyze
+- Do NOT use clarification questions from the conversation history as the query
+- Only use the conversation history to understand context for incomplete queries (e.g., "what about June?")
+
 INSTRUCTIONS:
 1. If the current query is complete and standalone → return it unchanged
 2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
 3. Preserve the user's intent and style
 4. Keep technical terms and column names consistent with previous queries
+5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
 
 EXAMPLES:
 

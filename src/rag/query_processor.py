@@ -774,38 +774,105 @@ async def processUserQuery(
                         "retrieval_confidence": retrieval_confidence
                     })
             else:
-                decision = "FALLBACK_FLOW"
-                log_step("static_confidence_decision", {
-                    "route": "static",
-                    "routerConfidence": confidence,
-                    "semanticCompleteness": semantic_completeness,
-                    "staticSimilarity": static_similarity,
-                    "chunkCountFactor": chunk_count_factor,
-                    "finalStaticConfidence": final_static_confidence,
-                    "decision": decision
-                })
-                
-                internet_result = await generate_internet_search_response(
-                    query=userMessage,
-                    qa_generator=qa_generator,
-                    log_step=log_step
-                )
-                
-                internet_result['route'] = route
-                internet_result['route_confidence'] = confidence
-                internet_result['retrievalConfidence'] = retrieval_confidence
-                internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                
-                log_step("pipeline_complete", {
-                    "route": route,
-                    "confidence": confidence,
-                    "retrieval_confidence": retrieval_confidence,
-                    "processing_time_ms": internet_result['processing_time_ms'],
-                    "internet_fallback": True,
-                    "success": True
-                })
-                
-                return internet_result
+                if static_chunks and len(static_chunks) > 0:
+                    decision = "AMBIGUITY_FLOW"
+                    if not is_clarification_followup:
+                        log_step("static_confidence_decision", {
+                            "route": "static",
+                            "routerConfidence": confidence,
+                            "semanticCompleteness": semantic_completeness,
+                            "staticSimilarity": static_similarity,
+                            "chunkCountFactor": chunk_count_factor,
+                            "finalStaticConfidence": final_static_confidence,
+                            "decision": decision,
+                            "note": "Low confidence but chunks found - using ambiguity flow instead of internet fallback"
+                        })
+                        
+                        clarification_result = await generate_clarification_question(
+                            query=userMessage,
+                            route=route,
+                            router_confidence=confidence,
+                            qa_generator=qa_generator,
+                            log_step=log_step
+                        )
+                        
+                        clarification_result['route'] = route
+                        clarification_result['route_confidence'] = confidence
+                        clarification_result['retrievalConfidence'] = retrieval_confidence
+                        clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                        clarification_result['original_query'] = userMessage
+                        
+                        log_step("pipeline_complete", {
+                            "route": route,
+                            "confidence": confidence,
+                            "retrieval_confidence": retrieval_confidence,
+                            "processing_time_ms": clarification_result['processing_time_ms'],
+                            "requires_clarification": True,
+                            "success": True
+                        })
+                        
+                        return clarification_result
+                    else:
+                        qa_result = await qa_generator.generate_answer(
+                            query=analyzed_query,
+                            chunks=static_chunks,
+                            custom_prompt=custom_prompt,
+                            user_id=user_id,
+                            conversation_history=conversationHistory,
+                            route=route,
+                            route_confidence=confidence
+                        )
+                        
+                        log_step("static_confidence_decision", {
+                            "route": "static",
+                            "routerConfidence": confidence,
+                            "semanticCompleteness": semantic_completeness,
+                            "staticSimilarity": static_similarity,
+                            "chunkCountFactor": chunk_count_factor,
+                            "finalStaticConfidence": final_static_confidence,
+                            "decision": decision,
+                            "note": "Low confidence but chunks found - proceeding with answer as clarification followup"
+                        })
+                        
+                        log_step("static_route_complete", {
+                            "chunks_used": qa_result.get('chunks_used', 0),
+                            "search_method": qa_result.get('search_method', 'unknown'),
+                            "retrieval_confidence": retrieval_confidence
+                        })
+                else:
+                    decision = "FALLBACK_FLOW"
+                    log_step("static_confidence_decision", {
+                        "route": "static",
+                        "routerConfidence": confidence,
+                        "semanticCompleteness": semantic_completeness,
+                        "staticSimilarity": static_similarity,
+                        "chunkCountFactor": chunk_count_factor,
+                        "finalStaticConfidence": final_static_confidence,
+                        "decision": decision,
+                        "note": "No chunks found - falling back to internet search"
+                    })
+                    
+                    internet_result = await generate_internet_search_response(
+                        query=userMessage,
+                        qa_generator=qa_generator,
+                        log_step=log_step
+                    )
+                    
+                    internet_result['route'] = route
+                    internet_result['route_confidence'] = confidence
+                    internet_result['retrievalConfidence'] = retrieval_confidence
+                    internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                    
+                    log_step("pipeline_complete", {
+                        "route": route,
+                        "confidence": confidence,
+                        "retrieval_confidence": retrieval_confidence,
+                        "processing_time_ms": internet_result['processing_time_ms'],
+                        "internet_fallback": True,
+                        "success": True
+                    })
+                    
+                    return internet_result
             
         elif route == "dynamic":
             log_step("dynamic_route_start", {})
