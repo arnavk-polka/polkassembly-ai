@@ -2,7 +2,7 @@
 # Core AI and ML dependencies
 openai==1.98.0
 tiktoken==0.7.0
-numpy==1.24.3
+numpy==1.26.0
 pandas==2.1.1
 psycopg2-binary==2.9.9
 
@@ -15,7 +15,7 @@ uvicorn==0.32.1
 python-multipart==0.0.12
 
 # Data Validation
-pydantic==2.11.7
+pydantic>=2.0,<3.0
 
 # Text Processing and Chunking
 langchain==0.2.17
