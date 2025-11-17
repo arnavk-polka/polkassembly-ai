@@ -6,6 +6,7 @@ Implements the new routing-first architecture with structured logging.
 import logging
 import json
 import re
+import math
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -15,6 +16,160 @@ from .clarification import generate_clarification_question
 from .internet_fallback import generate_internet_search_response
 
 logger = logging.getLogger(__name__)
+
+
+async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Optional[List[str]] = None) -> bool:
+    """
+    Determine if a query truly needs clarification using LLM.
+    
+    Only marks as ambiguous if a REQUIRED parameter is missing (e.g., referenda ID when asking for details).
+    Does NOT mark as ambiguous for missing optional parameters (e.g., network for generic listing queries).
+    
+    Uses GPT-3.5-turbo for fast, context-aware ambiguity detection.
+    
+    Args:
+        query: The user query to check
+        qa_generator: QA generator instance with LLM access
+        sql_queries: Optional list of SQL queries to analyze
+    
+    Returns:
+        True if query truly needs clarification (missing required parameter), False otherwise
+    """
+    if not qa_generator or not hasattr(qa_generator, 'client'):
+        logger.warning("No LLM client available for ambiguity check, defaulting to False")
+        return False
+    
+    sql_context = ""
+    if sql_queries:
+        sql_str = ' '.join(sql_queries) if isinstance(sql_queries, list) else str(sql_queries)
+        sql_context = f"\n\nSQL Query Generated: {sql_str[:200]}"
+    
+    ambiguity_prompt = f"""You are a STRICT ambiguity checker for a Polkadot/Kusama governance assistant.
+
+Your ONLY job:
+
+Decide if the user's query is missing a REQUIRED identifier for a **single, specific on-chain item** (referendum, proposal, bounty, treasury item, etc.).
+You must output ONLY one word: "true" or "false" (lowercase, no punctuation).
+
+User Query:
+
+"{query}"{sql_context}
+
+---
+
+DECISION RULES (follow these in order):
+
+1) IS THIS A LIST / SEARCH / AGGREGATE QUESTION?
+   - Examples: "show me proposals", "list treasury proposals", "find bounties",
+     "how many voters", "show active referenda", "show proposals about staking".
+   - If the query can reasonably be answered by returning a list, a count,
+     or a filtered list (by topic, date, track, etc.), then it is NOT ambiguous.
+   → In this case, answer "false".
+
+2) IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
+   - Look for language like:
+     - "this", "that", "the" + singular noun WITHOUT a topic/filter ("the referendum", "that bounty",
+       "this treasury proposal") - these refer to a specific item without identifier
+     - CRITICAL: If "the" is followed by a TOPIC/FILTER keyword, it's a LISTING query, NOT a specific item:
+       * "tell me about the polkabot.ai referenda" → LISTING (has topic "polkabot.ai")
+       * "show me the staking proposals" → LISTING (has topic "staking")
+     - If the query has a topic/filter keyword (like "polkabot.ai", "staking", "treasury", etc.),
+       it's a LISTING query and is NOT ambiguous
+
+   - If the query is NOT clearly about one specific item, it is NOT ambiguous.
+   → In this case, answer "false".
+
+3) IF IT IS ABOUT A SPECIFIC ITEM, DOES IT INCLUDE A CLEAR IDENTIFIER?
+
+   Acceptable identifiers include ANY of:
+
+   - A numeric ID (e.g., 123, 456, 1781)
+   - A full Polkassembly URL (which contains the ID
+   - An explicit unique title or name that could reasonably identify it
+     (e.g., a full proposal title, or a very specific phrase)
+
+   If any of these are present, then the query is NOT ambiguous.
+   → In this case, answer "false".
+
+4) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
+
+   - The user is clearly asking about ONE specific item (Step 2 = yes)
+   - AND they use vague references like "this", "that", "the" WITHOUT a topic/filter keyword
+   - AND there is NO numeric ID, NO URL with ID, and NO clear unique identifier
+   - AND there is NO topic/filter keyword (like "polkabot.ai", "staking", etc.)
+   - AND we cannot reasonably treat it as a list/search query instead
+   → ONLY in this case answer "true".
+
+IMPORTANT CONSTRAINTS:
+
+- The network (Polkadot vs Kusama) is ALWAYS OPTIONAL.
+  Missing network MUST NEVER make the query ambiguous.
+
+- Listing / searching / counting queries are NEVER ambiguous,
+  even if they could be more specific.
+
+- Queries with filters or topics ("about polkabot.ai", "about staking", "in October")
+  are NOT ambiguous if they can be answered by a list or count.
+
+- Do NOT try to be helpful or suggest follow-up questions.
+  Just decide: is a REQUIRED identifier missing for a single specific item?
+
+EXAMPLES (for your own understanding):
+
+Should be "true" (ambiguous):
+
+- "show me details about this referenda"
+- "what are the votes for that proposal"
+- "tell me about the treasury proposal"
+- "who is the curator of that bounty"
+
+Should be "false" (not ambiguous):
+
+- "show me proposals"
+- "list treasury proposals"
+- "show me referenda 123"
+- "what are the votes for proposal 456"
+- "show me active referenda"
+- "find bounties"
+- "how many voters"
+- "show me proposals on Polkadot"
+- "show proposals about staking"
+- "tell me about the polkabot.ai referenda" (has topic "polkabot.ai", so it's a listing query)
+- "show me the staking proposals" (has topic "staking", so it's a listing query)
+- "how many unique voters were there in November 2025"
+Now, after applying the rules above, respond with ONLY:
+true
+or
+false
+
+(lowercase, no extra text)."""
+    
+    try:
+        # Use GPT-4 for better accuracy on this task
+        model_to_use = "gpt-4"
+        
+        response = qa_generator.client.chat.completions.create(
+            model=model_to_use,
+            messages=[
+                {"role": "system", "content": "You are a query ambiguity detector. Respond with ONLY 'true' or 'false' (lowercase, one word)."},
+                {"role": "user", "content": ambiguity_prompt}
+            ],
+            temperature=0.0,
+            max_tokens=3
+        )
+        raw_answer = response.choices[0].message.content or ""
+        answer = raw_answer.strip().lower()
+        
+        # Parse the answer - extract first word
+        first_word = answer.split()[0] if answer.split() else ""
+        is_ambiguous = first_word == "true"
+        
+        logger.info(f"Ambiguity check - Query: '{query[:50]}', Model: {model_to_use}, Raw response: '{raw_answer}', Parsed: '{answer}', First word: '{first_word}', Is ambiguous: {is_ambiguous}")
+        
+        return is_ambiguous
+    except Exception as e:
+        logger.error(f"Error in LLM ambiguity check: {e}, defaulting to False")
+        return False
 
 
 async def combine_query_with_clarification(
@@ -290,6 +445,53 @@ async def detect_and_handle_clarification_response(
     }
 
 
+def get_router_confidence_from_logprobs(choice) -> float:
+    """Convert the logprob of the predicted route token into probability."""
+    try:
+        route_text = (choice.message.content or "").strip().lower()
+        if not route_text:
+            return 0.0
+        logprobs = getattr(choice, "logprobs", None)
+        if not logprobs:
+            return 0.0
+        content_tokens = getattr(logprobs, "content", None)
+        if not content_tokens:
+            return 0.0
+        def _token_field(token_info, field):
+            if isinstance(token_info, dict):
+                return token_info.get(field)
+            return getattr(token_info, field, None)
+        logprob_value = None
+        for token_info in content_tokens:
+            token = (_token_field(token_info, "token") or "").strip().lower()
+            if token == route_text:
+                logprob_value = _token_field(token_info, "logprob")
+                break
+        if logprob_value is None:
+            logprob_value = _token_field(content_tokens[-1], "logprob")
+        if logprob_value is None:
+            return 0.0
+        return float(math.exp(logprob_value))
+    except Exception:
+        return 0.0
+
+
+def fallback_route_inference(query_lower: str) -> str:
+    dynamic_keywords = ['proposal', 'referendum', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
+    static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition']
+    is_person_query = query_lower.startswith('who is ') and len(query_lower.split()) <= 4
+    governance_who_is = any(term in query_lower for term in ['delegate', 'curator', 'proposer', 'beneficiary', 'ambassador'])
+    if any(keyword in query_lower for keyword in dynamic_keywords):
+        return "dynamic"
+    if is_person_query and not governance_who_is:
+        return "generic"
+    if any(phrase in query_lower for phrase in static_keywords) or (query_lower.startswith('who is ') and governance_who_is):
+        return "static"
+    if any(word in query_lower for word in ['hi', 'hello', 'hey', 'greetings']):
+        return "generic"
+    return "static"
+
+
 async def route_query_llm(
     query: str,
     conversation_history: Optional[List[Dict[str, Any]]],
@@ -342,6 +544,7 @@ Available Routes:
    - "How to" questions about using Polkassembly features
    - Questions about processes, rules, or procedures
    - Questions about delegates, delegation concepts, or how delegation works
+   - Track definitions or theoretical limits without asking for actual on-chain numbers (e.g., "What is the Medium Spender track?")
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
@@ -351,7 +554,7 @@ Available Routes:
    - Questions about blockchain addresses (e.g., "Who is 0x163830...", "What proposals did [address] make", "Show me proposals by [address]")
    - Voting data (voter information, voting power, decisions)
    - Proposal filtering by ID, dates, network, type, status
-   - Aggregations, counts, or summaries of on-chain data
+   - Aggregations, counts, or summaries of on-chain data (e.g., "How many referenda were created in June?", "What is the max spend in the Medium Spender track?")
    - Questions asking to RETRIEVE or DISPLAY specific data from the blockchain
    - Questions asking for specific delegate addresses, vote counts, or on-chain delegate metrics
    - URLs to pages (e.g., "http://polkadot.polkassembly.io/referenda/1781" = very specific query for referenda 1781 on Polkadot)
@@ -371,112 +574,67 @@ Available Routes:
    - General knowledge questions about people (e.g., "Who is Gavin Wood", "Who is Satoshi Nakamoto")
    - Questions about individuals that require web search or general knowledge
 
-CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no text before or after. Just the JSON object.
+Respond with ONLY one word from: static, dynamic, hybrid, generic. No explanations.
 
-Example responses:
-{{"route": "static", "confidence": 0.9}}  // e.g., "Who is the most trustable delegate", "What is OpenGov"
-{{"route": "dynamic", "confidence": 0.95}}  // e.g., "Show me proposals from last month", "Who is the curator of 1671", "Who is 0x163830...", "http://polkadot.polkassembly.io/referenda/1781"
-{{"route": "generic", "confidence": 0.7}}  // e.g., "Hello", "Hi there", "Who is Gavin Wood"
-
-Now respond with ONLY the JSON for this query:
+Now respond for this query:
 """
         
-        if qa_generator.gemini_client:
-            model_name = getattr(qa_generator.gemini_client, 'model_name', 'Gemini')
-            log_step("router_llm_call", {"model": model_name})
-            
-            response = qa_generator.gemini_client.get_response(routing_prompt)
-            
-            result = None
-            
+        if getattr(qa_generator, "client", None):
             try:
-                result = json.loads(response.strip())
-            except json.JSONDecodeError:
-                import re
-                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
-                if json_match:
-                    try:
-                        result = json.loads(json_match.group(1))
-                    except json.JSONDecodeError:
-                        pass
-                
-                if not result:
-                    json_match = re.search(r'\{[^{}]*"route"[^{}]*"confidence"[^{}]*\}', response)
-                    if json_match:
-                        try:
-                            result = json.loads(json_match.group(0))
-                        except json.JSONDecodeError:
-                            pass
-                
-                if not result:
-                    route_match = re.search(r'"route"\s*:\s*"([^"]+)"', response, re.IGNORECASE)
-                    confidence_match = re.search(r'"confidence"\s*:\s*([0-9.]+)', response, re.IGNORECASE)
-                    if route_match:
-                        route_str = route_match.group(1).lower()
-                        confidence_val = float(confidence_match.group(1)) if confidence_match else 0.5
-                        if route_str in ['static', 'dynamic', 'hybrid', 'generic']:
-                            result = {"route": route_str, "confidence": confidence_val}
-            
-            if result:
-                route = result.get('route', 'static').lower()
-                confidence = float(result.get('confidence', 0.5))
-                
-                if route not in ['static', 'dynamic', 'hybrid', 'generic']:
-                    log_step("router_llm_invalid_route", {"route": route}, "warning")
-                    route = 'static'
-                    confidence = 0.5
-                
-                confidence = max(0.0, min(1.0, confidence))
-                
+                response = qa_generator.client.chat.completions.create(
+                    model=qa_generator.model,
+                    messages=[{"role": "user", "content": routing_prompt}],
+                    temperature=0.0,
+                    max_tokens=4,
+                    logprobs=True,
+                    top_logprobs=5
+                )
+                choice = response.choices[0]
+                route_text = (choice.message.content or "").strip().lower()
+                if route_text.endswith('.'):
+                    route_text = route_text[:-1]
+                allowed_routes = ['static', 'dynamic', 'hybrid', 'generic']
+                if route_text not in allowed_routes:
+                    route_text = None
+                probability = get_router_confidence_from_logprobs(choice)
+                certainty = (
+                    "high" if probability >= 0.85 else
+                    "medium" if probability >= 0.60 else
+                    "low"
+                )
                 log_step("router_llm_complete", {
-                    "route": route,
-                    "confidence": confidence
+                    "route": route_text,
+                    "probability": probability,
+                    "certainty": certainty
                 })
-                
-                return {
-                    "route": route,
-                    "confidence": confidence
-                }
-            else:
-                log_step("router_llm_parse_error", {
-                    "error": "Could not extract JSON from response",
-                    "response_preview": response[:200]
-                }, "error")
-                
-                query_lower = query.lower()
-                
-                dynamic_keywords = ['proposal', 'referendum', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
-                static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition']
-                # Check for "who is" - if it's a person name (not governance concept), route to generic
-                is_person_query = query_lower.startswith('who is ') and len(query.split()) <= 4  # Simple heuristic: "who is [name]" is likely a person
-                governance_who_is = any(term in query_lower for term in ['delegate', 'curator', 'proposer', 'beneficiary', 'ambassador'])
-                
-                if any(keyword in query_lower for keyword in dynamic_keywords):
-                    route = "dynamic"
-                elif is_person_query and not governance_who_is:
-                    route = "generic"  # "Who is [person name]" -> generic for web search
-                elif any(phrase in query_lower for phrase in static_keywords) or (query_lower.startswith('who is ') and governance_who_is):
-                    route = "static"
-                elif any(word in query_lower for word in ['hi', 'hello', 'hey', 'greetings']):
-                    route = "generic"
-                else:
-                    route = "static"
-                
-                log_step("router_llm_fallback_inference", {
-                    "route": route,
-                    "reason": "json_parse_failed_using_query_analysis"
+                if route_text and probability >= 0.60:
+                    return {
+                        "route": route_text,
+                        "confidence": probability
+                    }
+                fallback_route = fallback_route_inference(query.lower())
+                log_step("router_llm_low_confidence_fallback", {
+                    "fallback_route": fallback_route,
+                    "probability": probability
                 }, "warning")
-                
                 return {
-                    "route": route,
-                    "confidence": 0.5
+                    "route": fallback_route,
+                    "confidence": probability
                 }
+            except Exception as e:
+                log_step("router_llm_error", {"error": str(e)}, "error")
         else:
-            log_step("router_llm_fallback", {"reason": "no_gemini_client"}, "warning")
-            return {
-                "route": "static",
-                "confidence": 0.5
-            }
+            log_step("router_llm_fallback", {"reason": "no_openai_client"}, "warning")
+        
+        fallback_route = fallback_route_inference(query.lower())
+        log_step("router_llm_parse_error", {
+            "route": fallback_route,
+            "reason": "llm_response_unavailable"
+        }, "error")
+        return {
+            "route": fallback_route,
+            "confidence": 0.5
+        }
             
     except Exception as e:
         log_step("router_llm_error", {"error": str(e)}, "error")
@@ -537,6 +695,7 @@ async def processUserQuery(
         stored_route = None
         stored_router_confidence = None
         is_voting_data = False  # Track if query is for voting_data table
+        is_ambiguous_query = False  # Track if query truly needs clarification (missing required parameter)
         
         if is_clarification_followup:
             log_step("clarification_followup_detected", {
@@ -845,32 +1004,26 @@ async def processUserQuery(
         elif route == "dynamic":
             log_step("dynamic_route_start", {})
             
-            # Check which table will be used - skip clarification for voting_data
-            # Use analyzed query for table selection to get full context (e.g., "how about in july" -> "How many unique voters were there in July 2025")
+            # Check which table will be used - skip ambiguity check for voting_data
             selected_table = qa_generator._determine_table_from_query(analyzed_query)
             is_voting_data = selected_table == "voting_data" if selected_table else False
             
             log_step("table_selection_check", {
                 "selected_table": selected_table,
-                "skip_clarification": is_voting_data
+                "skip_ambiguity_check": is_voting_data
             })
             
-            from .confidence import getSemanticCompletenessScore
-            
-            # Skip semantic completeness check and clarification for voting_data queries
-            # Voting data is in a separate DB and cannot filter by network
-            semantic_score = None
-            if not is_voting_data:
-                semantic_score = await getSemanticCompletenessScore(analyzed_query, qa_generator)
-                log_step("semantic_completeness_check", {
-                    "semantic_score": semantic_score,
-                    "threshold": 0.35
-                })
+            # Check ambiguity immediately after routing - before SQL generation
+            # If ambiguous, return clarification question immediately
+            # Use analyzed_query (enhanced/modified) instead of original userMessage
+            if not is_voting_data and not is_clarification_followup:
+                is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
                 
-                if semantic_score < 0.35:
-                    log_step("semantic_completeness_low", {
-                        "semantic_score": semantic_score,
-                        "action": "triggering_ambiguity_flow"
+                if is_ambiguous_query:
+                    log_step("ambiguous_query_detected_early", {
+                        "query": analyzed_query,
+                        "user_query": userMessage,
+                        "note": "Query is ambiguous - missing required parameter, returning clarification immediately"
                     })
                     
                     clarification_result = await generate_clarification_question(
@@ -886,7 +1039,6 @@ async def processUserQuery(
                     clarification_result['retrievalConfidence'] = 0.0
                     clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                     clarification_result['original_query'] = userMessage
-                    clarification_result['semanticCompleteness'] = semantic_score
                     
                     log_step("pipeline_complete", {
                         "route": route,
@@ -894,18 +1046,18 @@ async def processUserQuery(
                         "retrieval_confidence": 0.0,
                         "processing_time_ms": clarification_result['processing_time_ms'],
                         "requires_clarification": True,
-                        "semantic_completeness": semantic_score,
                         "success": True
                     })
                     
                     return clarification_result
             else:
-                log_step("semantic_completeness_skipped", {
-                    "reason": "voting_data table - network filtering not possible"
-                })
-                # Set a high score for voting_data since we skip the check
-                semantic_score = 1.0
+                if is_voting_data:
+                    log_step("ambiguity_check_skipped", {
+                        "reason": "voting_data table - network filtering not possible"
+                    })
+                is_ambiguous_query = False
             
+            # Proceed with SQL generation and answer (query is not ambiguous)
             qa_result = await qa_generator.generate_answer(
                 query=analyzed_query,
                 chunks=[],
@@ -917,23 +1069,28 @@ async def processUserQuery(
                 dynamic_embedding_manager=dynamic_embedding_manager
             )
             
-            # Handle SQL precision too low (requires clarification)
-            # Skip for voting_data - network filtering not possible, so clarification won't help
-            if qa_result.get('requires_clarification', False) and qa_result.get('search_method') == 'sql_precision_too_low':
-                sql_precision = qa_result.get('sql_precision', 0.0)
-                
-                if is_voting_data:
-                    log_step("sql_precision_too_low_skipped", {
-                        "sql_precision": sql_precision,
-                        "reason": "voting_data table - network filtering not possible, proceeding anyway"
-                    })
-                    # Clear the requires_clarification flag so it proceeds
-                    qa_result['requires_clarification'] = False
-                else:
-                    log_step("sql_precision_too_low", {
-                        "sql_precision": sql_precision,
-                        "threshold": 0.3,
-                        "action": "triggering_ambiguity_flow"
+            # Extract validator and result information
+            validator_verdict = qa_result.get('validator_verdict')
+            validator_reason = qa_result.get('validator_reason')
+            requires_clarification = qa_result.get('requires_clarification', False)
+            requires_fallback = qa_result.get('requires_fallback', False)
+            result_count = qa_result.get('result_count', 0)
+            sql_precision = qa_result.get('sql_precision')
+            
+            # Decision logic based on validator_verdict as primary signal
+            decision = None
+            
+            # Case 1: validator_verdict == "bad" - treat as hard error, need clarification
+            if validator_verdict == "bad":
+                if not is_ambiguous_query and not is_clarification_followup:
+                    decision = "CLARIFICATION"
+                    log_step("dynamic_validator_bad", {
+                        "validator_verdict": validator_verdict,
+                        "validator_reason": validator_reason,
+                        "result_count": result_count,
+                        "requires_clarification": requires_clarification,
+                        "requires_fallback": requires_fallback,
+                        "decision": decision
                     })
                     
                     clarification_result = await generate_clarification_question(
@@ -949,7 +1106,8 @@ async def processUserQuery(
                     clarification_result['retrievalConfidence'] = 0.0
                     clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                     clarification_result['original_query'] = userMessage
-                    clarification_result['sqlPrecision'] = sql_precision
+                    clarification_result['validator_verdict'] = validator_verdict
+                    clarification_result['validator_reason'] = validator_reason
                     
                     log_step("pipeline_complete", {
                         "route": route,
@@ -957,17 +1115,25 @@ async def processUserQuery(
                         "retrieval_confidence": 0.0,
                         "processing_time_ms": clarification_result['processing_time_ms'],
                         "requires_clarification": True,
-                        "sql_precision": sql_precision,
+                        "validator_verdict": validator_verdict,
                         "success": True
                     })
                     
                     return clarification_result
+                else:
+                    # Already ambiguous or clarification followup - proceed with answer anyway
+                    decision = "ANSWER"
             
-            # Handle no results (requires fallback)
-            if qa_result.get('requires_fallback', False) and qa_result.get('search_method') == 'no_results':
-                log_step("no_results_fallback", {
-                    "result_count": qa_result.get('result_count', 0),
-                    "action": "triggering_fallback_flow"
+            # Case 2: validator_verdict == "empty" - no results, trigger fallback
+            elif validator_verdict == "empty" or (result_count == 0 and not qa_result.get('success', False)):
+                decision = "FALLBACK"
+                log_step("dynamic_validator_empty", {
+                    "validator_verdict": validator_verdict,
+                    "validator_reason": validator_reason,
+                    "result_count": result_count,
+                    "requires_clarification": requires_clarification,
+                    "requires_fallback": requires_fallback,
+                    "decision": decision
                 })
                 
                 internet_result = await generate_internet_search_response(
@@ -980,6 +1146,8 @@ async def processUserQuery(
                 internet_result['route_confidence'] = confidence
                 internet_result['retrievalConfidence'] = 0.0
                 internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                internet_result['validator_verdict'] = validator_verdict
+                internet_result['validator_reason'] = validator_reason
                 
                 log_step("pipeline_complete", {
                     "route": route,
@@ -987,201 +1155,155 @@ async def processUserQuery(
                     "retrieval_confidence": 0.0,
                     "processing_time_ms": internet_result['processing_time_ms'],
                     "internet_fallback": True,
+                    "validator_verdict": validator_verdict,
                     "success": True
                 })
                 
                 return internet_result
             
-            # Skip ambiguity check for voting_data - network filtering not possible
-            is_ambiguous_query = False
-            sql_has_network_filter = False
-            if not is_voting_data:
-                # Check if query is ambiguous (missing network specification)
-                # Ambiguous if: user didn't specify network AND (SQL filtered by network OR SQL returned both networks)
-                # Check both original and analyzed query for network mentions
-                user_query_lower = userMessage.lower()
-                analyzed_query_lower = analyzed_query.lower()
-                
-                # Check for explicit network mentions
-                has_network_in_user_query = any(network in user_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
-                has_network_in_analyzed = any(network in analyzed_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
-                
-                # Check if user explicitly asked for "both" networks
-                explicitly_both_networks = (
-                    'both' in user_query_lower and 
-                    ('polkadot' in user_query_lower or 'kusama' in user_query_lower) and
-                    ('polkadot' in analyzed_query_lower or 'kusama' in analyzed_query_lower)
-                )
-                
-                # User specified network if it's in either query OR they explicitly asked for both
-                has_network_specified = has_network_in_user_query or has_network_in_analyzed or explicitly_both_networks
-                
-                # Check if SQL query contains network filter
-                sql_queries = qa_result.get('sql_query', [])
-                sql_has_both_networks = False
-                is_aggregate_query = False
-                if sql_queries:
-                    if isinstance(sql_queries, list):
-                        sql_query_str = ' '.join(sql_queries).lower()
-                    else:
-                        sql_query_str = str(sql_queries).lower()
-                    sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
-                    # Check if SQL explicitly filters for both networks
-                    sql_has_both_networks = 'source_network' in sql_query_str and 'polkadot' in sql_query_str and 'kusama' in sql_query_str
-                    # Check if SQL contains aggregate functions (COUNT, SUM, AVG, MAX, MIN)
-                    # Aggregate queries are asking for summary statistics, so it's reasonable to return data from both networks
-                    is_aggregate_query = any(func in sql_query_str for func in ['count(', 'sum(', 'avg(', 'max(', 'min(', 'count(*)'])
+            # Case 3: validator_verdict == "partial" - proceed with answer, log partial match
+            elif validator_verdict == "partial":
+                decision = "ANSWER"
+                log_step("dynamic_validator_partial", {
+                    "validator_verdict": validator_verdict,
+                    "validator_reason": validator_reason,
+                    "result_count": result_count,
+                    "requires_clarification": requires_clarification,
+                    "requires_fallback": requires_fallback,
+                    "decision": decision,
+                    "note": "Results may be incomplete, proceeding with answer"
+                })
             
-                # Check if results contain multiple networks (indicating no network filter was applied)
-                # This is a proxy check - if SQL didn't filter by network, results likely contain both
-                results_have_multiple_networks = False
-                if qa_result.get('success', False) and qa_result.get('result_count', 0) > 0:
-                    # If SQL doesn't have network filter, assume it returned both networks
-                    results_have_multiple_networks = not sql_has_network_filter
-                
-                # Query is ambiguous if:
-                # 1. User didn't specify network (and didn't ask for both), AND
-                # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
-                # 3. SQL got results
-                # NOT ambiguous if: user asked for both networks and SQL has both networks
-                # NOT ambiguous if: SQL is an aggregate query (COUNT, SUM, etc.) - aggregate queries are fine without network specification
-                is_ambiguous_query = (
-                    not has_network_specified and 
-                    (sql_has_network_filter or results_have_multiple_networks) and
-                    qa_result.get('success', False) and 
-                    qa_result.get('result_count', 0) > 0 and
-                    not is_aggregate_query
-                ) and not (explicitly_both_networks and sql_has_both_networks)
+            # Case 4: validator_verdict == "good" - normal success path
+            elif validator_verdict == "good":
+                decision = "ANSWER"
+                log_step("dynamic_validator_good", {
+                    "validator_verdict": validator_verdict,
+                    "validator_reason": validator_reason,
+                    "result_count": result_count,
+                    "requires_clarification": requires_clarification,
+                    "requires_fallback": requires_fallback,
+                    "decision": decision
+                })
+            
+            # Case 5: validator_verdict is missing (backward compatibility)
             else:
-                log_step("ambiguity_check_skipped", {
-                    "reason": "voting_data table - network filtering not possible"
-                })
+                # Fall back to existing requires_clarification / requires_fallback behavior
+                if requires_clarification:
+                    decision = "CLARIFICATION"
+                    log_step("dynamic_fallback_clarification", {
+                        "validator_verdict": validator_verdict,
+                        "validator_reason": validator_reason,
+                        "result_count": result_count,
+                        "requires_clarification": requires_clarification,
+                        "requires_fallback": requires_fallback,
+                        "decision": decision,
+                        "note": "Using requires_clarification flag (validator_verdict missing)"
+                    })
+                    
+                    if not is_ambiguous_query and not is_clarification_followup:
+                        clarification_result = await generate_clarification_question(
+                            query=userMessage,
+                            route=route,
+                            router_confidence=confidence,
+                            qa_generator=qa_generator,
+                            log_step=log_step
+                        )
+                        
+                        clarification_result['route'] = route
+                        clarification_result['route_confidence'] = confidence
+                        clarification_result['retrievalConfidence'] = 0.0
+                        clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                        clarification_result['original_query'] = userMessage
+                        clarification_result['validator_verdict'] = validator_verdict
+                        clarification_result['validator_reason'] = validator_reason
+                        
+                        log_step("pipeline_complete", {
+                            "route": route,
+                            "confidence": confidence,
+                            "retrieval_confidence": 0.0,
+                            "processing_time_ms": clarification_result['processing_time_ms'],
+                            "requires_clarification": True,
+                            "validator_verdict": validator_verdict,
+                            "success": True
+                        })
+                        
+                        return clarification_result
+                elif requires_fallback or result_count == 0:
+                    decision = "FALLBACK"
+                    log_step("dynamic_fallback_no_results", {
+                        "validator_verdict": validator_verdict,
+                        "validator_reason": validator_reason,
+                        "result_count": result_count,
+                        "requires_clarification": requires_clarification,
+                        "requires_fallback": requires_fallback,
+                        "decision": decision,
+                        "note": "Using requires_fallback flag or result_count == 0 (validator_verdict missing)"
+                    })
+                    
+                    internet_result = await generate_internet_search_response(
+                        query=analyzed_query,
+                        qa_generator=qa_generator,
+                        log_step=log_step
+                    )
+                    
+                    internet_result['route'] = route
+                    internet_result['route_confidence'] = confidence
+                    internet_result['retrievalConfidence'] = 0.0
+                    internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                    internet_result['validator_verdict'] = validator_verdict
+                    internet_result['validator_reason'] = validator_reason
+                    
+                    log_step("pipeline_complete", {
+                        "route": route,
+                        "confidence": confidence,
+                        "retrieval_confidence": 0.0,
+                        "processing_time_ms": internet_result['processing_time_ms'],
+                        "internet_fallback": True,
+                        "validator_verdict": validator_verdict,
+                        "success": True
+                    })
+                    
+                    return internet_result
+                else:
+                    decision = "ANSWER"
+                    log_step("dynamic_fallback_answer", {
+                        "validator_verdict": validator_verdict,
+                        "validator_reason": validator_reason,
+                        "result_count": result_count,
+                        "requires_clarification": requires_clarification,
+                        "requires_fallback": requires_fallback,
+                        "decision": decision,
+                        "note": "Proceeding with answer (validator_verdict missing, no flags set)"
+                    })
             
-            if is_ambiguous_query:
-                log_step("ambiguous_query_detected", {
-                    "query": analyzed_query,
-                    "user_query": userMessage,
-                    "sql_has_network_filter": sql_has_network_filter,
-                    "note": "Query is ambiguous - SQL filtered by network user didn't specify"
-                })
-            
+            # Calculate confidence for logging/metrics
             retrieval_confidence, _ = await compute_retrieval_confidence(
                 route=route,
                 router_confidence=confidence,
-                sql_result_count=qa_result.get('result_count', 0),
+                sql_result_count=result_count,
                 sql_success=qa_result.get('success', False),
-                is_ambiguous_query=is_ambiguous_query,
+                is_ambiguous_query=False,
                 query=analyzed_query,
                 sql_query=qa_result.get('sql_query', []),
                 qa_generator=qa_generator
             )
             
-            result_count = qa_result.get('result_count', 0)
-            final_confidence = retrieval_confidence
-            
-            # Updated decision logic for dynamic route
-            decision = None
-            if result_count > 0:
-                if final_confidence >= 0.65:
-                    decision = "ANSWER"
-                else:
-                    # Skip ambiguity flow for voting_data - network filtering not possible
-                    if is_voting_data:
-                        decision = "ANSWER"
-                        log_step("voting_data_low_confidence_override", {
-                            "final_confidence": final_confidence,
-                            "reason": "voting_data table - network filtering not possible, returning answer anyway"
-                        })
-                    else:
-                        decision = "AMBIGUITY_FLOW"
-                        if not is_clarification_followup:
-                            clarification_result = await generate_clarification_question(
-                                query=userMessage,
-                                route=route,
-                                router_confidence=confidence,
-                                qa_generator=qa_generator,
-                                log_step=log_step
-                            )
-                            
-                            clarification_result['route'] = route
-                            clarification_result['route_confidence'] = confidence
-                            clarification_result['retrievalConfidence'] = retrieval_confidence
-                            clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                            clarification_result['original_query'] = userMessage
-                            clarification_result['semanticCompleteness'] = semantic_score
-                            clarification_result['sqlPrecision'] = qa_result.get('sql_precision', None)
-                            
-                            log_step("dynamic_decision_log", {
-                                "route": "dynamic",
-                                "semanticCompleteness": semantic_score,
-                                "sqlPrecision": qa_result.get('sql_precision', None),
-                                "resultCount": result_count,
-                                "finalConfidence": final_confidence,
-                                "decision": decision
-                            })
-                            
-                            log_step("pipeline_complete", {
-                                "route": route,
-                                "confidence": confidence,
-                                "retrieval_confidence": retrieval_confidence,
-                                "processing_time_ms": clarification_result['processing_time_ms'],
-                                "requires_clarification": True,
-                                "success": True
-                            })
-                            
-                            return clarification_result
-            else:
-                decision = "FALLBACK_FLOW"
-                internet_result = await generate_internet_search_response(
-                    query=analyzed_query,
-                    qa_generator=qa_generator,
-                    log_step=log_step
-                )
-                
-                internet_result['route'] = route
-                internet_result['route_confidence'] = confidence
-                internet_result['retrievalConfidence'] = retrieval_confidence
-                internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                
-                log_step("dynamic_decision_log", {
-                    "route": "dynamic",
-                    "semanticCompleteness": semantic_score,
-                    "sqlPrecision": qa_result.get('sql_precision', None),
-                    "resultCount": result_count,
-                    "finalConfidence": final_confidence,
-                    "decision": decision
-                })
-                
-                log_step("pipeline_complete", {
-                    "route": route,
-                    "confidence": confidence,
-                    "retrieval_confidence": retrieval_confidence,
-                    "processing_time_ms": internet_result['processing_time_ms'],
-                    "internet_fallback": True,
-                    "success": True
-                })
-                
-                return internet_result
-            
-            log_step("dynamic_route_complete", {
-                "success": qa_result.get('success', False),
+            # Log final decision summary
+            log_step("dynamic_route_decision", {
+                "validator_verdict": validator_verdict,
+                "validator_reason": validator_reason,
                 "result_count": result_count,
-                "search_method": qa_result.get('search_method', 'unknown'),
-                "retrieval_confidence": retrieval_confidence,
-                "is_ambiguous_query": is_ambiguous_query
+                "requires_clarification": requires_clarification,
+                "requires_fallback": requires_fallback,
+                "decision": decision,
+                "sql_precision": sql_precision
             })
             
-            log_step("dynamic_decision_log", {
-                "route": "dynamic",
-                "semanticCompleteness": semantic_score,
-                "sqlPrecision": qa_result.get('sql_precision', None),
-                "resultCount": result_count,
-                "finalConfidence": final_confidence,
-                "decision": decision
-            })
-            
-            qa_result['semanticCompleteness'] = semantic_score
-            qa_result['sqlPrecision'] = qa_result.get('sql_precision', None)
+            qa_result['sqlPrecision'] = sql_precision
+            qa_result['retrievalConfidence'] = retrieval_confidence
+            qa_result['route'] = route
+            qa_result['route_confidence'] = confidence
             
         elif route == "hybrid":
             log_step("hybrid_route_start", {})
@@ -1213,44 +1335,44 @@ async def processUserQuery(
             
             hybrid_dynamic_available = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
             
-            # Check if query is ambiguous (missing network specification for dynamic part)
-            user_query_lower = userMessage.lower()
-            has_network_in_user_query = any(network in user_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
-            
-            # Check if SQL query contains network filter
-            sql_queries = qa_result.get('sql_query', [])
-            sql_has_network_filter = False
-            if sql_queries:
-                if isinstance(sql_queries, list):
-                    sql_query_str = ' '.join(sql_queries).lower()
-                else:
-                    sql_query_str = str(sql_queries).lower()
-                sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
-            
-            # Check if results contain multiple networks (indicating no network filter was applied)
-            results_have_multiple_networks = False
-            if qa_result.get('success', False) and qa_result.get('result_count', 0) > 0:
-                # If SQL doesn't have network filter, assume it returned both networks
-                results_have_multiple_networks = not sql_has_network_filter
-            
-            # Query is ambiguous if:
-            # 1. User didn't specify network, AND
-            # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
-            # 3. SQL got results
-            is_ambiguous_query = (
-                not has_network_in_user_query and 
-                (sql_has_network_filter or results_have_multiple_networks) and
-                qa_result.get('success', False) and 
-                qa_result.get('result_count', 0) > 0
-            )
-            
-            if is_ambiguous_query:
-                log_step("ambiguous_query_detected_hybrid", {
-                    "query": analyzed_query,
-                    "user_query": userMessage,
-                    "sql_has_network_filter": sql_has_network_filter,
-                    "note": "Hybrid query is ambiguous - SQL filtered by network user didn't specify"
-                })
+            # Check ambiguity immediately for hybrid route (before processing further)
+            # Use analyzed_query (enhanced/modified) instead of original userMessage
+            if not is_clarification_followup:
+                is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
+                
+                if is_ambiguous_query:
+                    log_step("ambiguous_query_detected_hybrid_early", {
+                        "query": analyzed_query,
+                        "user_query": userMessage,
+                        "note": "Hybrid query is ambiguous - missing required parameter, returning clarification immediately"
+                    })
+                    
+                    clarification_result = await generate_clarification_question(
+                        query=userMessage,
+                        route=route,
+                        router_confidence=confidence,
+                        qa_generator=qa_generator,
+                        log_step=log_step
+                    )
+                    
+                    clarification_result['route'] = route
+                    clarification_result['route_confidence'] = confidence
+                    clarification_result['retrievalConfidence'] = 0.0
+                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                    clarification_result['original_query'] = userMessage
+                    
+                    log_step("pipeline_complete", {
+                        "route": route,
+                        "confidence": confidence,
+                        "retrieval_confidence": 0.0,
+                        "processing_time_ms": clarification_result['processing_time_ms'],
+                        "requires_clarification": True,
+                        "success": True
+                    })
+                    
+                    return clarification_result
+            else:
+                is_ambiguous_query = False
             
             retrieval_confidence, _ = await compute_retrieval_confidence(
                 route=route,
@@ -1260,7 +1382,7 @@ async def processUserQuery(
                 sql_success=qa_result.get('success', False),
                 hybrid_static_available=hybrid_static_available,
                 hybrid_dynamic_available=hybrid_dynamic_available,
-                is_ambiguous_query=is_ambiguous_query,
+                is_ambiguous_query=False,  # Already checked, so set to False
                 query=analyzed_query,
                 sql_query=qa_result.get('sql_query', []),
                 qa_generator=qa_generator
@@ -1381,141 +1503,9 @@ async def processUserQuery(
                 retrieval_confidence = 0.0
                 qa_result['retrievalConfidence'] = 0.0
             
-            # New threshold logic: 0.65 for ANSWER, 0.35 for AMBIGUITY_FLOW, below 0.35 for FALLBACK_FLOW
-            # BUT: If we have data but confidence is low, go to AMBIGUITY_FLOW instead of FALLBACK_FLOW
-            final_confidence = retrieval_confidence
-            
-            # Check if we have data available (static route already handled its own logic)
-            has_data = False
-            if route == "dynamic":
-                has_data = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
-            elif route == "hybrid":
-                has_data = (
-                    (len(static_chunks) > 0 if 'static_chunks' in locals() and static_chunks else False) or
-                    (qa_result.get('success', False) and qa_result.get('result_count', 0) > 0)
-                )
-            
-            if final_confidence >= 0.65:
-                # ANSWER: High confidence, proceed with answer
-                log_step("confidence_high_answer", {
-                    "final_confidence": final_confidence,
-                    "threshold": 0.65,
-                    "action": "ANSWER"
-                })
-            elif 0.35 <= final_confidence < 0.65:
-                # AMBIGUITY_FLOW: Medium confidence, ask for clarification
-                # Skip clarification for voting_data - network filtering not possible
-                # Skip clarification if this is already a clarification followup (to avoid loops)
-                if is_voting_data:
-                    log_step("voting_data_medium_confidence_override", {
-                        "final_confidence": final_confidence,
-                        "reason": "voting_data table - network filtering not possible, returning answer anyway"
-                    })
-                elif not is_clarification_followup:
-                    log_step("confidence_medium_ambiguity", {
-                        "final_confidence": final_confidence,
-                        "threshold_low": 0.35,
-                        "threshold_high": 0.65,
-                        "action": "AMBIGUITY_FLOW"
-                    })
-                    
-                    clarification_result = await generate_clarification_question(
-                        query=userMessage,
-                        route=route,
-                        router_confidence=confidence,
-                        qa_generator=qa_generator,
-                        log_step=log_step
-                    )
-                    
-                    clarification_result['route'] = route
-                    clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = retrieval_confidence
-                    clarification_result['processing_time_ms'] = processing_time
-                    clarification_result['original_query'] = userMessage
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": retrieval_confidence,
-                        "processing_time_ms": processing_time,
-                        "requires_clarification": True,
-                        "success": True
-                    })
-                    
-                    return clarification_result
-                else:
-                    # Already a clarification followup with medium confidence - log but proceed
-                    log_step("clarification_followup_medium_confidence", {
-                        "final_confidence": final_confidence,
-                        "note": "Proceeding despite medium confidence as this is already a clarification followup"
-                    }, "warning")
-            else:
-                # Low confidence (< 0.35)
-                # If we have data but confidence is low (ambiguous query), go to AMBIGUITY_FLOW
-                # Only use FALLBACK_FLOW if we truly have no data
-                if has_data and not is_clarification_followup:
-                    # We have data but query is ambiguous - ask for clarification
-                    log_step("confidence_low_but_has_data_ambiguity", {
-                        "final_confidence": final_confidence,
-                        "has_data": has_data,
-                        "threshold": 0.35,
-                        "action": "AMBIGUITY_FLOW"
-                    })
-                    
-                    clarification_result = await generate_clarification_question(
-                        query=userMessage,
-                        route=route,
-                        router_confidence=confidence,
-                        qa_generator=qa_generator,
-                        log_step=log_step
-                    )
-                    
-                    clarification_result['route'] = route
-                    clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = retrieval_confidence
-                    clarification_result['processing_time_ms'] = processing_time
-                    clarification_result['original_query'] = userMessage
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": retrieval_confidence,
-                        "processing_time_ms": processing_time,
-                        "requires_clarification": True,
-                        "success": True
-                    })
-                    
-                    return clarification_result
-                else:
-                    # FALLBACK_FLOW: Low confidence and no data, use internet search fallback
-                    log_step("confidence_low_fallback", {
-                        "final_confidence": final_confidence,
-                        "has_data": has_data,
-                        "threshold": 0.35,
-                        "action": "FALLBACK_FLOW"
-                    })
-                    
-                    internet_result = await generate_internet_search_response(
-                        query=analyzed_query,
-                        qa_generator=qa_generator,
-                        log_step=log_step
-                    )
-                    
-                    internet_result['route'] = route
-                    internet_result['route_confidence'] = confidence
-                    internet_result['retrievalConfidence'] = retrieval_confidence
-                    internet_result['processing_time_ms'] = processing_time
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": retrieval_confidence,
-                        "processing_time_ms": processing_time,
-                        "internet_fallback": True,
-                        "success": True
-                    })
-                    
-                    return internet_result
+            # Ambiguity is already checked early in the route-specific blocks
+            # At this point, if we reach here, the query is not ambiguous
+            # Just proceed with the answer (confidence is only for logging/metrics)
         
         qa_result['route'] = route
         qa_result['route_confidence'] = confidence
