@@ -3,10 +3,40 @@ Confidence computation utilities for retrieval quality assessment.
 """
 
 import re
+import math
 import logging
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+def _read_field(obj, field):
+    if isinstance(obj, dict):
+        return obj.get(field)
+    return getattr(obj, field, None)
+
+
+def _get_token_probability(choice, target_token: str) -> Optional[float]:
+    logprobs = getattr(choice, "logprobs", None)
+    if not logprobs:
+        return None
+    content = getattr(logprobs, "content", None)
+    if not content:
+        return None
+    for token_info in content:
+        token = (_read_field(token_info, "token") or "").strip().lower()
+        if not token:
+            continue
+        logprob = _read_field(token_info, "logprob")
+        if logprob is None:
+            continue
+        if token == target_token:
+            return float(math.exp(logprob))
+    token_info = content[0]
+    logprob = _read_field(token_info, "logprob")
+    if logprob is None:
+        return None
+    return float(math.exp(logprob))
 
 
 async def getSemanticCompletenessScore(query: str, qa_generator) -> float:
@@ -20,7 +50,8 @@ async def getSemanticCompletenessScore(query: str, qa_generator) -> float:
     Returns:
         Float score between 0.0 and 1.0
     """
-    prompt = f"""Rate how specific this query is for SQL generation from 0.0 (very vague) to 1.0 (highly specific). Return only the number.
+    prompt = f"""Decide if this query is SPECIFIC (good for SQL) or VAGUE (needs clarification).
+Respond with only one word: SPECIFIC or VAGUE.
 
 CRITICAL: URL HANDLING:
 - If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), this is HIGHLY SPECIFIC (score 0.9-1.0)
@@ -32,34 +63,36 @@ CRITICAL: URL HANDLING:
 Query: {query}"""
     
     try:
-        if qa_generator.gemini_client:
-            response = qa_generator.gemini_client.get_response(prompt)
-        elif hasattr(qa_generator, 'client'):
-            response_obj = qa_generator.client.chat.completions.create(
-                model=qa_generator.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=10
-            )
-            response = response_obj.choices[0].message.content.strip()
-        else:
-            logger.warning("No LLM client available for semantic completeness scoring")
+        if not hasattr(qa_generator, 'client'):
+            logger.warning("No OpenAI client available for semantic completeness scoring")
             return 0.5
-        
-        # Extract number from response
-        response = response.strip()
-        # Remove any quotes
-        response = response.strip('"').strip("'")
-        # Extract first float number
-        match = re.search(r'([0-9]*\.?[0-9]+)', response)
-        if match:
-            score = float(match.group(1))
-            # Clamp to [0, 1]
-            score = max(0.0, min(1.0, score))
-            return score
+
+        response_obj = qa_generator.client.chat.completions.create(
+            model=qa_generator.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=2,
+            logprobs=True,
+            top_logprobs=5
+        )
+        choice = response_obj.choices[0]
+        answer = (choice.message.content or "").strip().lower().strip('.')
+        probability = _get_token_probability(choice, answer)
+        if probability is None:
+            probability = 0.0
+        if answer == "specific":
+            score = probability
+        elif answer == "vague":
+            score = 1.0 - probability
         else:
-            logger.warning(f"Could not parse semantic completeness score from response: {response}")
-            return 0.5
+            score = probability
+        score = max(0.0, min(1.0, score))
+        logger.info("semantic_specificity_result", {
+            "answer": answer,
+            "probability": probability,
+            "score": score
+        })
+        return score
     except Exception as e:
         logger.error(f"Error computing semantic completeness score: {e}")
         return 0.5

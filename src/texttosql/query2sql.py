@@ -77,6 +77,7 @@ def print_model_usage(model_name: str, purpose: str):
 GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.5-pro')
 GEMINI_MODEL_SQL = os.getenv('GEMINI_MODEL_SQL', 'gemini-2.5-pro')
 GEMINI_TIMEOUT = float(os.getenv('GEMINI_TIMEOUT', '30'))
+GEMINI_SQL_TIMEOUT = float(os.getenv('GEMINI_SQL_TIMEOUT', '120'))  # Longer timeout for SQL generation
 
 # Add tiktoken for token counting
 try:
@@ -152,7 +153,7 @@ class Query2SQL:
             # Initialize Gemini as fallback
             if GeminiClient is not None:
                 try:
-                    self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_TIMEOUT)
+                    self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_SQL_TIMEOUT)
                     logger.info(f"Gemini {GEMINI_MODEL_SQL} initialized as fallback")
                 except Exception as e:
                     logger.warning(f"Gemini fallback initialization failed: {e}")
@@ -160,7 +161,7 @@ class Query2SQL:
             # Initialize Gemini as primary (default for non-chatgpt values)
             if GeminiClient is not None:
                 try:
-                    self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_TIMEOUT)
+                    self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_SQL_TIMEOUT)
                     logger.info(f"Gemini {GEMINI_MODEL_SQL} initialized as primary SQL model")
                 except Exception as e:
                     logger.error(f"Gemini 2.5 Pro initialization failed: {e}")
@@ -480,6 +481,91 @@ class Query2SQL:
         
         return trimmed_prompt
     
+    def _generate_sql_with_model_deterministic(self, system_prompt: str) -> str:
+        """Generate SQL using deterministic settings (temperature=0, top_p=1, seed=42)"""
+        try:
+            if self.sql_model == 'chatgpt' and self.openai_client:
+                print_model_usage("GPT-4", "SQL generation (governance data, deterministic)")
+                logger.debug("Using ChatGPT for deterministic SQL generation")
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "user", "content": system_prompt}
+                    ],
+                    temperature=0.0,
+                    top_p=1.0,
+                    seed=42,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content.strip()
+            elif self.gemini_client:
+                print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (governance data, deterministic)")
+                logger.debug("Using Gemini for deterministic SQL generation")
+                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+
+{system_prompt}"""
+                try:
+                    response = self.gemini_client.get_response(full_prompt)
+                    return response.strip()
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
+                        logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model: {e}")
+                        try:
+                            print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
+                            fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
+                            response = fallback_client.get_response(full_prompt)
+                            logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
+                            return response.strip()
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback Gemini model also failed: {fallback_error}")
+                            raise e
+                    else:
+                        raise e
+            elif self.openai_client:
+                print_model_usage("GPT-4", "SQL generation fallback (governance data, deterministic)")
+                logger.debug("Using ChatGPT as fallback for deterministic SQL generation")
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "user", "content": system_prompt}
+                    ],
+                    temperature=0.0,
+                    top_p=1.0,
+                    seed=42,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content.strip()
+            else:
+                raise ValueError("No SQL generation model available")
+        except Exception as e:
+            logger.error(f"Error in deterministic SQL model, trying fallback: {e}")
+            if self.sql_model != 'chatgpt' and self.openai_client:
+                logger.info("Falling back to ChatGPT for deterministic SQL generation")
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "user", "content": system_prompt}
+                    ],
+                    temperature=0.0,
+                    top_p=1.0,
+                    seed=42,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content.strip()
+            elif self.sql_model == 'chatgpt' and self.gemini_client:
+                logger.info("Falling back to Gemini for deterministic SQL generation")
+                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+
+{system_prompt}"""
+                response = self.gemini_client.get_response(full_prompt)
+                return response.strip()
+            else:
+                raise e
+
     def _generate_sql_with_model(self, system_prompt: str, user_message: str = None) -> str:
         """Generate SQL using the configured model (Gemini or ChatGPT) with fallback for 503 errors"""
         try:
@@ -519,7 +605,7 @@ class Query2SQL:
                         # Create a fallback Gemini client with the general model
                         try:
                             print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
-                            fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
+                            fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
                             response = fallback_client.get_response(full_prompt)
                             logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
                             return response.strip()
@@ -576,7 +662,7 @@ class Query2SQL:
                 raise e
     
     def _get_table_schema(self) -> str:
-        """Load schema directly from JSON file"""
+        """Load and format schema from JSON file with column descriptions and expected values"""
         try:
             schema_path_str = os.getenv('POSTGRES_SCHEMA_PATH')
             if not schema_path_str:
@@ -590,21 +676,36 @@ class Query2SQL:
             with open(schema_path, 'r') as f:
                 schema_data = json.load(f)
             
-            # Return schema_data directly as string
-            logger.info(f"Loaded schema directly from JSON file: {schema_path}")
-            return str(schema_data)
+            # Use the formatted schema method which includes descriptions
+            # This provides better context to the LLM about column types and expected values
+            logger.info(f"Loaded schema from JSON file: {schema_path}, formatting for LLM")
+            return self._get_table_schema_fallback()
             
         except Exception as e:
-            logger.error(f"Error loading schema directly from JSON: {e}")
+            logger.error(f"Error loading schema: {e}")
             # Fallback to old method if loading fails
             logger.warning("Falling back to old schema generation method")
             return self._get_table_schema_fallback()
     
     def _get_table_schema_fallback(self) -> str:
-        """Fallback method to generate schema from loaded schema_info"""
+        """Fallback method to generate schema from loaded schema_info with expected values"""
         schema_parts = []
         schema_parts.append(f"Table: {self.table_name}")
         schema_parts.append("\nColumns:")
+        
+        # Known enum columns with expected values
+        enum_values = {
+            'onchaininfo_origin': ['BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', 
+                                   'Root', 'Treasurer', 'GeneralAdmin', 'AuctionAdmin', 'LeaseAdmin', 
+                                   'StakingAdmin', 'FellowshipAdmin', 'ReferendumCanceller', 'ReferendumKiller',
+                                   'WhitelistedCaller', 'FastGeneralAdmin', 'WishForChange', 'Candidates',
+                                   'Members', 'Experts', 'Masters', 'GrandMasters', 'Fellows', 'SeniorFellows',
+                                   'SeniorExperts', 'SeniorMasters', 'Proficients'],
+            'source_network': ['polkadot', 'kusama'],
+            'source_proposal_type': ['ReferendumV2', 'TreasuryProposal', 'Bounty', 'ChildBounty', 'FellowshipReferendum'],
+            'onchaininfo_status': ['Deciding', 'Confirming', 'Approved', 'Rejected', 'Cancelled', 'TimedOut',
+                                   'Killed', 'DecisionDepositPlaced', 'Submitted', 'ConfirmStarted', 'ConfirmAborted']
+        }
         
         for column, info in self.schema_info.items():
             # Handle both old and new schema formats
@@ -617,7 +718,15 @@ class Query2SQL:
                 data_type = 'unknown'
                 description = str(info)
             
-            schema_parts.append(f"  - {column} ({data_type}): {description}")
+            # Add expected values for enum-like columns
+            if column in enum_values:
+                expected_values = ', '.join([f"'{v}'" for v in enum_values[column][:10]])  # Show first 10
+                if len(enum_values[column]) > 10:
+                    expected_values += f", ... (and {len(enum_values[column]) - 10} more)"
+                schema_parts.append(f"  - {column} ({data_type}): {description}")
+                schema_parts.append(f"    Expected values: {expected_values}")
+            else:
+                schema_parts.append(f"  - {column} ({data_type}): {description}")
         
         return "\n".join(schema_parts)
     
@@ -1045,6 +1154,139 @@ class Query2SQL:
             # Final fallback response
             return f"I found {len(results)} results for your query '{natural_query}', but I'm having trouble formatting the response. Here's a summary: The query returned {len(results)} rows from the database."
     
+    def _validate_sql_answer(self, natural_query: str, sql_query: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Validate if SQL results match the user's question.
+        
+        Args:
+            natural_query: The original user question
+            sql_query: The generated SQL query
+            results: The SQL query results
+            
+        Returns:
+            Dict with keys: verdict ("good" | "partial" | "bad" | "empty"), reason (str)
+        """
+        default_verdict = {
+            "verdict": "good",
+            "reason": "validator_failed_fallback"
+        }
+        
+        # Prepare sample results (first 5 rows, safely serialized)
+        sample_results = results[:5] if results else []
+        
+        # Safely serialize results - handle non-serializable types
+        def safe_serialize(obj):
+            """Safely serialize an object for JSON"""
+            if obj is None:
+                return None
+            elif isinstance(obj, (str, int, float, bool)):
+                return obj
+            elif isinstance(obj, dict):
+                return {k: safe_serialize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [safe_serialize(item) for item in obj]
+            else:
+                return str(obj)
+        
+        sample_results_serialized = safe_serialize(sample_results)
+        results_count = len(results)
+        
+        validation_prompt = f"""Validate if the SQL query results match the user's question.
+
+User Question: "{natural_query}"
+
+Generated SQL Query:
+{sql_query}
+
+SQL Results:
+- Total rows returned: {results_count}
+- Sample results (first {len(sample_results)} rows):
+{json.dumps(sample_results_serialized, indent=2) if sample_results_serialized else "[]"}
+
+You must return ONLY valid JSON with these exact keys:
+{{
+    "verdict": "good" | "partial" | "bad" | "empty",
+    "reason": "short explanation (1-2 sentences)"
+}}
+
+Verdict Definitions:
+- "empty": The result set is empty or meaningless for answering the question (no relevant data found).
+- "good": Rows clearly match the question (right entity type, IDs, network, time range, metric as requested).
+- "partial": Rows are related but clearly missing important constraints (e.g., wrong time range, wrong network, missing filters that were requested).
+- "bad": Rows are clearly off-topic or conflicting with the question (wrong entity type, wrong IDs, completely unrelated data).
+
+Return ONLY the JSON object, no other text."""
+
+        try:
+            # Use deterministic LLM call (temperature=0, top_p=1)
+            if self.sql_model == 'chatgpt' and self.openai_client:
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a SQL result validator. Return ONLY valid JSON with no additional text."},
+                        {"role": "user", "content": validation_prompt}
+                    ],
+                    temperature=0.0,
+                    top_p=1.0,
+                    max_tokens=200
+                )
+                response_text = response.choices[0].message.content.strip()
+            elif self.gemini_client:
+                full_prompt = f"""You are a SQL result validator. Return ONLY valid JSON with no additional text.
+
+{validation_prompt}"""
+                response_text = self.gemini_client.get_response(full_prompt).strip()
+            else:
+                logger.warning("No LLM client available for SQL validation, using default verdict")
+                return default_verdict
+            
+            # Clean response (remove markdown code blocks if present)
+            response_text = response_text.replace('```json', '').replace('```', '').strip()
+            
+            # Try to extract JSON from response
+            try:
+                # Find JSON object in response
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response_text[json_start:json_end]
+                    validation_result = json.loads(json_str)
+                    
+                    # Validate and normalize verdict
+                    verdict = validation_result.get("verdict", "good")
+                    reason = validation_result.get("reason", "No reason provided")
+                    
+                    # Validate enum values
+                    valid_verdicts = ["good", "partial", "bad", "empty"]
+                    if verdict not in valid_verdicts:
+                        verdict = "good"
+                        reason = f"Invalid verdict '{validation_result.get('verdict')}', defaulting to 'good'"
+                    
+                    result = {
+                        "verdict": verdict,
+                        "reason": reason
+                    }
+                    
+                    # Log validation result
+                    log_level = "warning" if verdict in ["bad", "empty"] else "info"
+                    logger.log(
+                        getattr(logging, log_level.upper()),
+                        f"SQL validation - verdict: {verdict}, reason: {reason}, "
+                        f"query: {natural_query[:120]}, sql: {sql_query[:120]}"
+                    )
+                    
+                    return result
+                else:
+                    logger.warning(f"Could not find JSON in validation response: {response_text[:200]}")
+                    return default_verdict
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse validation JSON: {e}, response: {response_text[:200]}")
+                return default_verdict
+                
+        except Exception as e:
+            logger.error(f"Error validating SQL answer: {e}")
+            return default_verdict
+
     def process_query(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, table: Optional[str] = None) -> Dict[str, Any]:
         """Main method to process a natural language query end-to-end with error correction"""
         try:
@@ -1077,7 +1319,9 @@ class Query2SQL:
                         "success": False,
                         "error": "sql_precision_too_low",
                         "sql_precision": sql_precision,
-                        "requires_clarification": True
+                        "requires_clarification": True,
+                        "validator_verdict": None,
+                        "validator_reason": None
                     }
             
             # Step 2: Execute SQL queries
@@ -1097,7 +1341,9 @@ class Query2SQL:
                     "natural_response": "",
                     "success": False,
                     "error": "no_results",
-                    "requires_fallback": True
+                    "requires_fallback": True,
+                    "validator_verdict": None,
+                    "validator_reason": None
                 }
             
             # Step 2: Process results
@@ -1124,7 +1370,12 @@ class Query2SQL:
                     "results": results,
                     "columns": columns,
                     "natural_response": natural_response,
-                    "success": True
+                    "success": True,
+                    "requires_fallback": False,
+                    "requires_clarification": False,
+                    "search_method": "sql_query",
+                    "validator_verdict": None,
+                    "validator_reason": None
                 }
             else:
                 # Multiple queries
@@ -1138,11 +1389,6 @@ class Query2SQL:
                     formatted_all_results.append((enhanced_results, columns))
                 all_results = formatted_all_results
                 
-                # Step 3: Generate natural language response from multiple results
-                natural_response = self.generate_natural_response_multiple(
-                    natural_query, sql_queries, all_results, conversation_history
-                )
-                
                 # Combine all results for response
                 combined_results = []
                 combined_columns = []
@@ -1154,6 +1400,11 @@ class Query2SQL:
                         combined_columns.extend(columns)
                     total_result_count += len(results)
                 
+                # Step 3: Generate natural language response from multiple results
+                natural_response = self.generate_natural_response_multiple(
+                    natural_query, sql_queries, all_results, conversation_history
+                )
+                
                 return {
                     "original_query": natural_query,
                     "sql_query": "; ".join(sql_queries),  # Combined for backwards compatibility
@@ -1163,7 +1414,12 @@ class Query2SQL:
                     "columns": list(set(combined_columns)),
                     "all_results": all_results,  # Detailed results per query
                     "natural_response": natural_response,
-                    "success": True
+                    "success": True,
+                    "requires_fallback": False,
+                    "requires_clarification": False,
+                    "search_method": "sql_query",
+                    "validator_verdict": None,
+                    "validator_reason": None
                 }
             
         except Exception as e:
@@ -1177,13 +1433,152 @@ class Query2SQL:
                 "columns": [],
                 "natural_response": "I'm sorry, I encountered an error processing your query. Please try rephrasing your question or try again later.",
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "validator_verdict": None,
+                "validator_reason": None
             }
 
-    def _generate_sql_queries_only(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> List[str]:
-        """Generate SQL queries without executing them"""
+    def _extract_sql_intent(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Extract structured intent from natural language query.
+        Returns a deterministic intent object that will be used for SQL generation.
         
-        # Retrieve relevant governance proposals from Chroma as contextual examples
+        Args:
+            natural_query: The user's natural language query
+            conversation_history: Optional conversation history for context
+            
+        Returns:
+            Dict with keys: entity_type, network, id, time_range, metric, filters
+        """
+        default_intent = {
+            "entity_type": "unknown",
+            "network": "unspecified",
+            "id": None,
+            "time_range": "unspecified",
+            "metric": "list",
+            "filters": ""
+        }
+        
+        # Format conversation history for intent extraction
+        history_text = "No previous conversation"
+        if conversation_history:
+            history_parts = []
+            for i, msg in enumerate(conversation_history, 1):
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")
+                if content:
+                    history_parts.append(f"{i}. {role}: {content[:150]}")
+            if history_parts:
+                history_text = "\n".join(history_parts)
+        
+        intent_prompt = f"""Extract structured intent from this natural language query about Polkadot/Kusama governance data.
+
+User Query: "{natural_query}"
+
+Conversation History:
+{history_text}
+
+You must return ONLY valid JSON with these exact keys:
+{{
+    "entity_type": "referenda" | "treasury_proposal" | "bounty" | "voter" | "delegate" | "unknown",
+    "network": "polkadot" | "kusama" | "both" | "unspecified",
+    "id": number or null,
+    "time_range": "last_30_days" | "last_90_days" | "all_time" | "unspecified",
+    "metric": "count" | "list" | "sum" | "avg" | "details",
+    "filters": "short free-text description of additional filters"
+}}
+
+Rules:
+- entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, voters, delegates, or unknown)
+- network: Extract network preference (polkadot, kusama, both, or unspecified if not mentioned)
+- id: Extract specific proposal/referendum ID if mentioned (number or null)
+- time_range: Extract time filter if mentioned (last_30_days, last_90_days, all_time, or unspecified)
+- metric: Determine what operation (count, list, sum, avg, or details for specific item)
+- filters: Brief description of any other filters (e.g., "status=active", "title contains X", "amount > Y")
+
+Return ONLY the JSON object, no other text."""
+
+        try:
+            # Use deterministic LLM call (temperature=0, top_p=1)
+            if self.sql_model == 'chatgpt' and self.openai_client:
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a query intent extractor. Return ONLY valid JSON with no additional text."},
+                        {"role": "user", "content": intent_prompt}
+                    ],
+                    temperature=0.0,
+                    top_p=1.0,
+                    max_tokens=300
+                )
+                response_text = response.choices[0].message.content.strip()
+            elif self.gemini_client:
+                full_prompt = f"""You are a query intent extractor. Return ONLY valid JSON with no additional text.
+
+{intent_prompt}"""
+                response_text = self.gemini_client.get_response(full_prompt).strip()
+            else:
+                logger.warning("No LLM client available for intent extraction, using default intent")
+                return default_intent
+            
+            # Clean response (remove markdown code blocks if present)
+            response_text = response_text.replace('```json', '').replace('```', '').strip()
+            
+            # Try to extract JSON from response
+            try:
+                # Find JSON object in response
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response_text[json_start:json_end]
+                    intent = json.loads(json_str)
+                    
+                    # Validate and normalize intent
+                    validated_intent = {
+                        "entity_type": intent.get("entity_type", "unknown"),
+                        "network": intent.get("network", "unspecified"),
+                        "id": intent.get("id"),
+                        "time_range": intent.get("time_range", "unspecified"),
+                        "metric": intent.get("metric", "list"),
+                        "filters": intent.get("filters", "")
+                    }
+                    
+                    # Validate enum values
+                    valid_entity_types = ["referenda", "treasury_proposal", "bounty", "voter", "delegate", "unknown"]
+                    valid_networks = ["polkadot", "kusama", "both", "unspecified"]
+                    valid_time_ranges = ["last_30_days", "last_90_days", "all_time", "unspecified"]
+                    valid_metrics = ["count", "list", "sum", "avg", "details"]
+                    
+                    if validated_intent["entity_type"] not in valid_entity_types:
+                        validated_intent["entity_type"] = "unknown"
+                    if validated_intent["network"] not in valid_networks:
+                        validated_intent["network"] = "unspecified"
+                    if validated_intent["time_range"] not in valid_time_ranges:
+                        validated_intent["time_range"] = "unspecified"
+                    if validated_intent["metric"] not in valid_metrics:
+                        validated_intent["metric"] = "list"
+                    
+                    logger.info(f"Extracted intent: {json.dumps(validated_intent)}")
+                    return validated_intent
+                else:
+                    logger.warning(f"Could not find JSON in intent extraction response: {response_text[:200]}")
+                    return default_intent
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse intent JSON: {e}, response: {response_text[:200]}")
+                return default_intent
+                
+        except Exception as e:
+            logger.error(f"Error extracting intent: {e}")
+            return default_intent
+
+    def _generate_sql_queries_only(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> List[str]:
+        """Generate SQL queries without executing them - now uses intent extraction for deterministic generation"""
+        
+        # Step 1: Extract structured intent
+        intent = self._extract_sql_intent(natural_query, conversation_history)
+        logger.info(f"Intent extracted - entity_type: {intent['entity_type']}, network: {intent['network']}, metric: {intent['metric']}")
+        
+        # Step 2: Retrieve relevant governance proposals from Chroma as contextual examples (deterministic)
         governance_context = ""
         if self.embedding_manager:
             logger.info("📊 Embedding manager available - will retrieve governance examples")
@@ -1199,7 +1594,7 @@ class Query2SQL:
                 
                 results = self.embedding_manager.search_similar_chunks(
                     query=natural_query,
-                    n_results=3,
+                    n_results=10,
                     filter_metadata={"doc_type": "governance"}
                 )
                 
@@ -1207,15 +1602,32 @@ class Query2SQL:
                     logger.info(f"✅ Found {len(results)} results from Chroma")
                     logger.info("-" * 70)
                     
+                    # Make retrieval deterministic: sort by stable keys (network, then proposal_index, then created_at if available)
+                    def sort_key(chunk):
+                        metadata = chunk.get('metadata', {})
+                        network = metadata.get('network', 'unknown')
+                        proposal_idx = metadata.get('proposal_index', 'unknown')
+                        # Convert proposal_idx to int for proper sorting, fallback to 0 if not numeric
+                        try:
+                            proposal_idx_int = int(proposal_idx) if proposal_idx != 'unknown' else 0
+                        except (ValueError, TypeError):
+                            proposal_idx_int = 0
+                        created_at = metadata.get('created_at', metadata.get('createdat', ''))
+                        return (network, proposal_idx_int, created_at)
+                    
+                    sorted_results = sorted(results, key=sort_key)
+                    # Always take first 3 in deterministic order
+                    selected_results = sorted_results[:3]
+                    
                     context_parts = []
-                    for i, chunk in enumerate(results[:3], 1):
+                    for i, chunk in enumerate(selected_results, 1):
                         content = chunk.get('content', '')
                         metadata = chunk.get('metadata', {})
                         network = metadata.get('network', 'unknown')
                         proposal_idx = metadata.get('proposal_index', 'unknown')
                         proposal_type = metadata.get('proposal_type', 'unknown')
                         
-                        logger.info(f"Result {i}:")
+                        logger.info(f"Result {i} (deterministic order):")
                         logger.info(f"  Network: {network}")
                         logger.info(f"  Proposal Index: {proposal_idx}")
                         logger.info(f"  Proposal Type: {proposal_type}")
@@ -1225,7 +1637,7 @@ class Query2SQL:
                         context_parts.append(f"Example {i} (Proposal {network}#{proposal_idx}):\n{content[:500]}")
                     
                     governance_context = "\n\nRELEVANT GOVERNANCE PROPOSALS (for reference):\n" + "\n\n".join(context_parts) + "\n\nUse these examples to understand the data structure and write better SQL queries.\n"
-                    logger.info(f"✅ Added {len(results[:3])} governance proposals as context for SQL generation")
+                    logger.info(f"✅ Added {len(selected_results)} governance proposals as context for SQL generation (deterministic order)")
                     logger.info("=" * 70)
                 else:
                     logger.info("❌ No relevant governance proposals found in Chroma")
@@ -1252,7 +1664,71 @@ class Query2SQL:
             if history_parts:
                 history_text = "\n".join(history_parts)
         
-        base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries.
+        # Build intent-based SQL generation prompt
+        intent_json_str = json.dumps(intent, indent=2)
+        
+        # Build network filter instruction based on intent
+        network_filter_instruction = ""
+        if intent["network"] in ["polkadot", "kusama"]:
+            network_filter_instruction = f'\n- CRITICAL: Add WHERE filter: "source_network" = \'{intent["network"]}\' AND "source_network" IS NOT NULL'
+        elif intent["network"] == "both":
+            network_filter_instruction = '\n- CRITICAL: Do NOT filter by network - include both Polkadot and Kusama'
+        else:
+            network_filter_instruction = '\n- CRITICAL: Do NOT filter by network unless explicitly mentioned in filters'
+        
+        # Build time range filter instruction
+        time_filter_instruction = ""
+        if intent["time_range"] == "last_30_days":
+            time_filter_instruction = '\n- Add date filter: "createdat" >= CURRENT_DATE - INTERVAL \'30 days\' AND "createdat" IS NOT NULL'
+        elif intent["time_range"] == "last_90_days":
+            time_filter_instruction = '\n- Add date filter: "createdat" >= CURRENT_DATE - INTERVAL \'90 days\' AND "createdat" IS NOT NULL'
+        elif intent["time_range"] == "all_time":
+            time_filter_instruction = '\n- No time filter needed - include all time periods'
+        else:
+            time_filter_instruction = '\n- Use time filter only if explicitly mentioned in the query or filters field'
+        
+        # Build metric instruction
+        metric_instruction = ""
+        if intent["metric"] == "count":
+            metric_instruction = '\n- Use COUNT(*) aggregation'
+        elif intent["metric"] == "sum":
+            metric_instruction = '\n- Use SUM() aggregation on appropriate amount fields'
+        elif intent["metric"] == "avg":
+            metric_instruction = '\n- Use AVG() aggregation on appropriate numeric fields'
+        elif intent["metric"] == "details":
+            metric_instruction = '\n- Return full details (SELECT multiple columns) for the specific item'
+        else:
+            metric_instruction = '\n- Return list of items (SELECT with LIMIT)'
+        
+        # Build ID filter instruction
+        id_filter_instruction = ""
+        if intent["id"] is not None:
+            id_filter_instruction = f'\n- CRITICAL: Filter by ID: "index" = {intent["id"]} AND "index" IS NOT NULL'
+        
+        base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries using the structured intent provided.
+
+STRUCTURED INTENT (use this as primary input):
+{intent_json_str}
+
+INTENT-BASED SQL GENERATION RULES:
+{network_filter_instruction}
+{time_filter_instruction}
+{metric_instruction}
+{id_filter_instruction}
+- Use intent.filters field only as additional WHERE conditions, not as free-form text
+- The intent.network field determines network filtering:
+  * If "polkadot" or "kusama": add WHERE filter for that network
+  * If "both" or "unspecified": do NOT filter by network
+- The intent.metric field determines SELECT/aggregation:
+  * "count": Use COUNT(*)
+  * "list": Use SELECT with LIMIT
+  * "sum": Use SUM() aggregation
+  * "avg": Use AVG() aggregation
+  * "details": Return full details for specific item
+- The intent.time_range field determines date filtering:
+  * "last_30_days": Filter to last 30 days
+  * "last_90_days": Filter to last 90 days
+  * "all_time" or "unspecified": No time filter
 
 CONVERSATION CONTEXT:
 Conversation history:
@@ -1265,6 +1741,8 @@ CRITICAL: URL HANDLING:
   * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
 - Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
 - URLs are HIGHLY SPECIFIC queries - no clarification needed
+- CRITICAL: Do NOT filter by "datasource" column based on URL domain - the datasource field may have different values or be NULL
+- Only use "index" and "source_network" to find the specific proposal from a URL
 
 CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
 - If the conversation history shows a pattern like:
@@ -1301,7 +1779,15 @@ DATABASE SCHEMA:
             7. Proposal IDs: Use 'index' column
             8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
             9. Text search: Use ILIKE for case-insensitive matching with % wildcards
-            10. When you filter data by taking keywords from query itself. Some you can take from title, however see the
+            10. Origin/Track filtering: Use 'onchaininfo_origin' column with EXACT match (=), NOT ILIKE
+               - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
+               - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
+               - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
+            11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
+               - The datasource field may have different values, be NULL, or not be a reliable filter
+               - For URL-based queries, only use "index" and "source_network" to find proposals
+               - Do NOT infer datasource filters from URL domains (e.g., polkassembly.io)
+            12. When you filter data by taking keywords from query itself. Some you can take from title, however see the
                 param supported in the DATABASE SCHEMA and use the nearest matching param. 
                 For example: 
                 -can you show me some treasury proposals currently in voting
@@ -1331,11 +1817,17 @@ DATABASE SCHEMA:
             - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
             - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
 
-            NaN VALUE HANDLING:
-            14. Some columns also contain 'NaN' string values - use != 'NaN' condition along with IS NOT NULL
-            15. For amount/numeric queries: Add both IS NOT NULL AND != 'NaN' conditions
-            16. When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
-            17. Example: WHERE "amount" IS NOT NULL AND "amount" != 'NaN' ORDER BY CAST("amount" AS FLOAT) DESC
+            CRITICAL NaN VALUE HANDLING (MANDATORY FOR AMOUNT QUERIES):
+            - Some columns contain 'NaN' as a STRING value (not NULL) - these must be filtered out
+            - For ANY query involving "onchaininfo_beneficiaries_0_amount" (max, min, highest, lowest, average, sum, ordering, etc.):
+              YOU MUST ADD: AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
+            - For amount/numeric queries: ALWAYS add BOTH conditions: IS NOT NULL AND != 'NaN'
+            - When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
+            - MANDATORY EXAMPLE for amount queries: 
+              WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
+              AND "onchaininfo_beneficiaries_0_amount" != 'NaN' 
+              ORDER BY CAST("onchaininfo_beneficiaries_0_amount" AS FLOAT) DESC
+            - If you forget to add != 'NaN', the query will return rows with NaN values which are meaningless
             
             MULTIPLE QUERIES STRATEGY:
             - If query asks for COUNT and EXAMPLES (like "how many proposals and name a few"), return 2 queries:
@@ -1350,6 +1842,17 @@ DATABASE SCHEMA:
             - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
             - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
+            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_address" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_address", "onchaininfo_beneficiaries_2_address", or "onchaininfo_beneficiaries_3_address" - these columns DO NOT EXIST and will cause SQL errors.
+            - CRITICAL: For ANY query filtering or ordering by "onchaininfo_beneficiaries_0_amount", you MUST add: 
+              AND "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
+              AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
+              Without the != 'NaN' check, queries will return meaningless NaN values.
+            
+            CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
+            - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
+            - "onchaininfo_reward": The REWARD amount for tips/bounties (not spending amounts)
+            - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
+            - For queries about tip/bounty rewards: USE "onchaininfo_reward"
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -1377,11 +1880,11 @@ DATABASE SCHEMA:
                 system_prompt = base_system_prompt
                 system_prompt = self.trim_prompt_to_fit_tokens(system_prompt)
                 
-                response_content = self._generate_sql_with_model(system_prompt)
+                # Use deterministic SQL generation
+                response_content = self._generate_sql_with_model_deterministic(system_prompt)
                 response_content = response_content.replace('```json', '').replace('```sql', '').replace('```', '').strip()
                 
                 try:
-                    import json
                     sql_queries = json.loads(response_content)
                     
                     # Handle case where LLM returns list of dicts with 'query' and 'description' keys
@@ -1403,7 +1906,9 @@ DATABASE SCHEMA:
                             normalized_queries.append(str(q))
                     sql_queries = normalized_queries
                     
-                    logger.info(f"Generated {len(sql_queries)} SQL queries (attempt {attempt + 1}): {sql_queries}")
+                    logger.info(f"Generated {len(sql_queries)} SQL queries (attempt {attempt + 1})")
+                    logger.info(f"SQL query preview: {sql_queries[0][:200]}..." if sql_queries else "No queries generated")
+                    logger.info(f"Intent used - network: {intent['network']}, entity_type: {intent['entity_type']}, metric: {intent['metric']}")
                     return sql_queries
                     
                 except json.JSONDecodeError:
@@ -1450,6 +1955,8 @@ CRITICAL: URL HANDLING:
   * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
 - Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
 - URLs are HIGHLY SPECIFIC queries - no clarification needed
+- CRITICAL: Do NOT filter by "datasource" column based on URL domain - the datasource field may have different values or be NULL
+- Only use "index" and "source_network" to find the specific proposal from a URL
 
 CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
 - If the conversation history shows a pattern like:
@@ -1486,7 +1993,15 @@ DATABASE SCHEMA:
             7. Proposal IDs: Use 'index' column
             8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
             9. Text search: Use ILIKE for case-insensitive matching with % wildcards
-            10. When you filter data by taking keywords from query itself. Some you can take from title, however see the
+            10. Origin/Track filtering: Use 'onchaininfo_origin' column with EXACT match (=), NOT ILIKE
+               - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
+               - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
+               - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
+            11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
+               - The datasource field may have different values, be NULL, or not be a reliable filter
+               - For URL-based queries, only use "index" and "source_network" to find proposals
+               - Do NOT infer datasource filters from URL domains (e.g., polkassembly.io)
+            12. When you filter data by taking keywords from query itself. Some you can take from title, however see the
                 param supported in the DATABASE SCHEMA and use the nearest matching param. 
                 For example: 
                 -can you show me some treasury proposals currently in voting
@@ -1516,11 +2031,17 @@ DATABASE SCHEMA:
             - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
             - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
 
-            NaN VALUE HANDLING:
-            14. Some columns also contain 'NaN' string values - use != 'NaN' condition along with IS NOT NULL
-            15. For amount/numeric queries: Add both IS NOT NULL AND != 'NaN' conditions
-            16. When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
-            17. Example: WHERE "amount" IS NOT NULL AND "amount" != 'NaN' ORDER BY CAST("amount" AS FLOAT) DESC
+            CRITICAL NaN VALUE HANDLING (MANDATORY FOR AMOUNT QUERIES):
+            - Some columns contain 'NaN' as a STRING value (not NULL) - these must be filtered out
+            - For ANY query involving "onchaininfo_beneficiaries_0_amount" (max, min, highest, lowest, average, sum, ordering, etc.):
+              YOU MUST ADD: AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
+            - For amount/numeric queries: ALWAYS add BOTH conditions: IS NOT NULL AND != 'NaN'
+            - When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
+            - MANDATORY EXAMPLE for amount queries: 
+              WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
+              AND "onchaininfo_beneficiaries_0_amount" != 'NaN' 
+              ORDER BY CAST("onchaininfo_beneficiaries_0_amount" AS FLOAT) DESC
+            - If you forget to add != 'NaN', the query will return rows with NaN values which are meaningless
             
             MULTIPLE QUERIES STRATEGY:
             - If query asks for COUNT and EXAMPLES (like "how many proposals and name a few"), return 2 queries:
@@ -1535,6 +2056,17 @@ DATABASE SCHEMA:
             - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
             - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
+            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_address" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_address", "onchaininfo_beneficiaries_2_address", or "onchaininfo_beneficiaries_3_address" - these columns DO NOT EXIST and will cause SQL errors.
+            - CRITICAL: For ANY query filtering or ordering by "onchaininfo_beneficiaries_0_amount", you MUST add: 
+              AND "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
+              AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
+              Without the != 'NaN' check, queries will return meaningless NaN values.
+            
+            CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
+            - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
+            - "onchaininfo_reward": The REWARD amount for tips/bounties (not spending amounts)
+            - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
+            - For queries about tip/bounty rewards: USE "onchaininfo_reward"
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -1645,7 +2177,6 @@ Generate the corrected SQL queries as a JSON array:
                 
                 try:
                     # Try to parse as JSON array
-                    import json
                     sql_queries = json.loads(response_content)
                     
                     # Handle case where LLM returns list of dicts with 'query' and 'description' keys
@@ -1728,7 +2259,6 @@ Generate the corrected SQL queries as a JSON array:
                         
                         try:
                             # Try to parse as JSON array
-                            import json
                             sql_queries = json.loads(response_content)
                             
                             # Ensure it's a list
@@ -1836,7 +2366,7 @@ class VoteQuery2SQL:
         # Initialize Gemini as primary for voting data
         if GeminiClient is not None:
             try:
-                self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_TIMEOUT)
+                self.gemini_client = GeminiClient(model_name=GEMINI_MODEL_SQL, timeout=GEMINI_SQL_TIMEOUT)
                 logger.info(f"Gemini {GEMINI_MODEL_SQL} initialized as primary SQL model for voting")
             except Exception as e:
                 logger.error(f"Gemini 2.5 Pro initialization failed: {e}")
@@ -2335,7 +2865,6 @@ SQL Query:
                 response_content = response_content.replace('```json', '').replace('```sql', '').replace('```', '').strip()
                 
                 try:
-                    import json
                     sql_queries = json.loads(response_content)
                     
                     # Handle case where LLM returns list of dicts with 'query' and 'description' keys
@@ -2740,7 +3269,6 @@ Generate the corrected SQL queries as a JSON array:
                 
                 try:
                     # Try to parse as JSON array
-                    import json
                     sql_queries = json.loads(response_content)
                     
                     # Ensure it's a list
@@ -2821,7 +3349,6 @@ Generate the corrected SQL queries as a JSON array:
                         
                         try:
                             # Try to parse as JSON array
-                            import json
                             sql_queries = json.loads(response_content)
                             
                             # Ensure it's a list

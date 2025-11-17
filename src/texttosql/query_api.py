@@ -90,7 +90,9 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
             "natural_response": f"I'm having trouble processing your query. Please try again or rephrase your question in the next prompt",
             "success": False,
             "error": str(e),
-            "table": table or "governance_data"
+            "table": table or "governance_data",
+            "validator_verdict": None,
+            "validator_reason": None
         }
 
 def main():
