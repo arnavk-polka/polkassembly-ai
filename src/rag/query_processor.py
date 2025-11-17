@@ -22,7 +22,8 @@ async def combine_query_with_clarification(
     clarification_response: str,
     clarification_question: str,
     qa_generator,
-    log_step
+    log_step,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     """
     Intelligently combine the original query with the user's clarification response
@@ -34,6 +35,7 @@ async def combine_query_with_clarification(
         clarification_question: The clarification question that was asked (needed to understand context)
         qa_generator: QA generator instance
         log_step: Logging function
+        conversation_history: Optional conversation history for additional context
     
     Returns:
         A combined query that intelligently merges the original query and clarification
@@ -44,6 +46,21 @@ async def combine_query_with_clarification(
         "clarification_response": clarification_response[:100]
     })
     
+    # Build conversation context if available
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        recent_messages = conversation_history[-6:]  # Last 6 messages (3 conversation turns) for context
+        context_parts = []
+        for msg in recent_messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '')
+                if content and len(content) > 5:
+                    role_display = role if role else 'user'
+                    context_parts.append(f"{role_display}: {content[:150]}")
+        if context_parts:
+            conversation_context = f"\n\nRecent conversation context (to understand what the original query refers to):\n" + "\n".join(context_parts)
+    
     combination_prompt = f"""
 You are helping to combine a user's original query with their clarification response.
 
@@ -51,10 +68,11 @@ Original query: "{original_query}"
 
 Clarification question that was asked: "{clarification_question}"
 
-User's clarification response: "{clarification_response}"
+User's clarification response: "{clarification_response}"{conversation_context}
 
 Your task:
 - Understand what the user's clarification response means in the context of the clarification question
+- Use the conversation context to understand what the original query refers to (e.g., if original query is "what about october", use context to understand it's about "unique voters")
 - Create a single, clear, and coherent query that combines both the original intent and the clarification
 - Make it natural and well-formed
 - Preserve the original intent while incorporating the clarification details
@@ -71,10 +89,11 @@ Clarification question: "Are you looking for information on the Polkadot or Kusa
 Clarification response: "both"
 Combined: "how many unique voters were there in november 2025 on both Polkadot and Kusama networks"
 
-Original: "what is governance"
-Clarification question: "What specific aspect of governance are you interested in?"
-Clarification response: "I want to see recent proposals"
-Combined: "what is governance and show me recent proposals"
+Original: "what about october"
+Context: Previous conversation was about "How many unique voters were there in November 2025?"
+Clarification question: "Are you asking about Polkadot or Kusama network in October?"
+Clarification response: "Kusama"
+Combined: "How many unique voters were there in October 2025 on the Kusama network?"
 
 Now create the combined query:
 """
@@ -195,6 +214,25 @@ async def detect_and_handle_clarification_response(
         }, "debug")
         return None
     
+    # Check if user message is a short clarification response (not a full new question)
+    # Full questions typically have: question words (how, what, when, etc.), multiple words, or are complete sentences
+    user_message_lower = userMessage.lower().strip()
+    word_count = len(user_message_lower.split())
+    question_words = ['how', 'what', 'when', 'where', 'who', 'why', 'which', 'can', 'could', 'should', 'would', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'will', 'show', 'tell', 'explain', 'list', 'find']
+    is_question_word = any(user_message_lower.startswith(qw + ' ') or user_message_lower.startswith(qw + '?') for qw in question_words)
+    has_question_mark = '?' in userMessage
+    
+    # If it looks like a full question (has question words, many words, or question mark), it's NOT a clarification
+    if is_question_word or word_count > 5 or has_question_mark:
+        log_step("clarification_check_full_question", {
+            "user_message": userMessage[:100],
+            "word_count": word_count,
+            "is_question_word": is_question_word,
+            "has_question_mark": has_question_mark,
+            "note": "User message looks like a full question, not a clarification response"
+        }, "debug")
+        return None
+    
     # Find the user query that came before this clarification question
     # Look backwards through history: assistant question -> user query (the one we need)
     original_query = None
@@ -233,13 +271,14 @@ async def detect_and_handle_clarification_response(
     original_router_confidence = route_result.get("confidence", 0.8)
     
     # Use LLM to intelligently combine original query with clarification response
-    # Pass the clarification question so the LLM understands what the response means
+    # Pass the clarification question and conversation history so the LLM understands context
     combined_query = await combine_query_with_clarification(
         original_query,
         userMessage,
         last_content,  # The clarification question
         qa_generator,
-        log_step
+        log_step,
+        conversationHistory  # Pass full conversation history for context
     )
     
     return {
@@ -271,7 +310,7 @@ async def route_query_llm(
         # Build conversation context for routing
         conversation_context = ""
         if conversation_history and len(conversation_history) > 0:
-            recent_messages = conversation_history[-3:]  # Last 3 messages for context
+            recent_messages = conversation_history[-6:]  # Last 6 messages (3 conversation turns) for context
             context_parts = []
             for msg in recent_messages:
                 if isinstance(msg, dict):
@@ -497,6 +536,7 @@ async def processUserQuery(
         combined_query = userMessage
         stored_route = None
         stored_router_confidence = None
+        is_voting_data = False  # Track if query is for voting_data table
         
         if is_clarification_followup:
             log_step("clarification_followup_detected", {
@@ -572,12 +612,17 @@ async def processUserQuery(
         if route == "static":
             log_step("static_route_start", {})
             
+            # Retrieve more chunks initially to ensure Polkassembly docs are included
+            # Polkassembly docs may have lower similarity scores but should be prioritized
+            initial_chunks_to_retrieve = max(max_chunks * 2, 10)
             static_chunks = static_embedding_manager.search_similar_chunks(
                 query=analyzed_query,
-                n_results=max_chunks
+                n_results=initial_chunks_to_retrieve
             )
             from .chunks_reranker import rerank_static_chunks
             static_chunks = rerank_static_chunks(static_chunks)
+            # Limit to max_chunks after reranking
+            static_chunks = static_chunks[:max_chunks]
             log_step("static_retrieval_complete", {"chunks_count": len(static_chunks)})
             
             retrieval_confidence, semantic_completeness = await compute_retrieval_confidence(
@@ -776,7 +821,7 @@ async def processUserQuery(
                     })
                     
                     internet_result = await generate_internet_search_response(
-                        query=userMessage,
+                        query=analyzed_query,
                         qa_generator=qa_generator,
                         log_step=log_step
                     )
@@ -800,46 +845,66 @@ async def processUserQuery(
         elif route == "dynamic":
             log_step("dynamic_route_start", {})
             
-            from .confidence import getSemanticCompletenessScore
+            # Check which table will be used - skip clarification for voting_data
+            # Use analyzed query for table selection to get full context (e.g., "how about in july" -> "How many unique voters were there in July 2025")
+            selected_table = qa_generator._determine_table_from_query(analyzed_query)
+            is_voting_data = selected_table == "voting_data" if selected_table else False
             
-            semantic_score = await getSemanticCompletenessScore(analyzed_query, qa_generator)
-            log_step("semantic_completeness_check", {
-                "semantic_score": semantic_score,
-                "threshold": 0.35
+            log_step("table_selection_check", {
+                "selected_table": selected_table,
+                "skip_clarification": is_voting_data
             })
             
-            if semantic_score < 0.35:
-                log_step("semantic_completeness_low", {
+            from .confidence import getSemanticCompletenessScore
+            
+            # Skip semantic completeness check and clarification for voting_data queries
+            # Voting data is in a separate DB and cannot filter by network
+            semantic_score = None
+            if not is_voting_data:
+                semantic_score = await getSemanticCompletenessScore(analyzed_query, qa_generator)
+                log_step("semantic_completeness_check", {
                     "semantic_score": semantic_score,
-                    "action": "triggering_ambiguity_flow"
+                    "threshold": 0.35
                 })
                 
-                clarification_result = await generate_clarification_question(
-                    query=userMessage,
-                    route=route,
-                    router_confidence=confidence,
-                    qa_generator=qa_generator,
-                    log_step=log_step
-                )
-                
-                clarification_result['route'] = route
-                clarification_result['route_confidence'] = confidence
-                clarification_result['retrievalConfidence'] = 0.0
-                clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                clarification_result['original_query'] = userMessage
-                clarification_result['semanticCompleteness'] = semantic_score
-                
-                log_step("pipeline_complete", {
-                    "route": route,
-                    "confidence": confidence,
-                    "retrieval_confidence": 0.0,
-                    "processing_time_ms": clarification_result['processing_time_ms'],
-                    "requires_clarification": True,
-                    "semantic_completeness": semantic_score,
-                    "success": True
+                if semantic_score < 0.35:
+                    log_step("semantic_completeness_low", {
+                        "semantic_score": semantic_score,
+                        "action": "triggering_ambiguity_flow"
+                    })
+                    
+                    clarification_result = await generate_clarification_question(
+                        query=userMessage,
+                        route=route,
+                        router_confidence=confidence,
+                        qa_generator=qa_generator,
+                        log_step=log_step
+                    )
+                    
+                    clarification_result['route'] = route
+                    clarification_result['route_confidence'] = confidence
+                    clarification_result['retrievalConfidence'] = 0.0
+                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                    clarification_result['original_query'] = userMessage
+                    clarification_result['semanticCompleteness'] = semantic_score
+                    
+                    log_step("pipeline_complete", {
+                        "route": route,
+                        "confidence": confidence,
+                        "retrieval_confidence": 0.0,
+                        "processing_time_ms": clarification_result['processing_time_ms'],
+                        "requires_clarification": True,
+                        "semantic_completeness": semantic_score,
+                        "success": True
+                    })
+                    
+                    return clarification_result
+            else:
+                log_step("semantic_completeness_skipped", {
+                    "reason": "voting_data table - network filtering not possible"
                 })
-                
-                return clarification_result
+                # Set a high score for voting_data since we skip the check
+                semantic_score = 1.0
             
             qa_result = await qa_generator.generate_answer(
                 query=analyzed_query,
@@ -853,40 +918,50 @@ async def processUserQuery(
             )
             
             # Handle SQL precision too low (requires clarification)
+            # Skip for voting_data - network filtering not possible, so clarification won't help
             if qa_result.get('requires_clarification', False) and qa_result.get('search_method') == 'sql_precision_too_low':
                 sql_precision = qa_result.get('sql_precision', 0.0)
-                log_step("sql_precision_too_low", {
-                    "sql_precision": sql_precision,
-                    "threshold": 0.3,
-                    "action": "triggering_ambiguity_flow"
-                })
                 
-                clarification_result = await generate_clarification_question(
-                    query=userMessage,
-                    route=route,
-                    router_confidence=confidence,
-                    qa_generator=qa_generator,
-                    log_step=log_step
-                )
-                
-                clarification_result['route'] = route
-                clarification_result['route_confidence'] = confidence
-                clarification_result['retrievalConfidence'] = 0.0
-                clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                clarification_result['original_query'] = userMessage
-                clarification_result['sqlPrecision'] = sql_precision
-                
-                log_step("pipeline_complete", {
-                    "route": route,
-                    "confidence": confidence,
-                    "retrieval_confidence": 0.0,
-                    "processing_time_ms": clarification_result['processing_time_ms'],
-                    "requires_clarification": True,
-                    "sql_precision": sql_precision,
-                    "success": True
-                })
-                
-                return clarification_result
+                if is_voting_data:
+                    log_step("sql_precision_too_low_skipped", {
+                        "sql_precision": sql_precision,
+                        "reason": "voting_data table - network filtering not possible, proceeding anyway"
+                    })
+                    # Clear the requires_clarification flag so it proceeds
+                    qa_result['requires_clarification'] = False
+                else:
+                    log_step("sql_precision_too_low", {
+                        "sql_precision": sql_precision,
+                        "threshold": 0.3,
+                        "action": "triggering_ambiguity_flow"
+                    })
+                    
+                    clarification_result = await generate_clarification_question(
+                        query=userMessage,
+                        route=route,
+                        router_confidence=confidence,
+                        qa_generator=qa_generator,
+                        log_step=log_step
+                    )
+                    
+                    clarification_result['route'] = route
+                    clarification_result['route_confidence'] = confidence
+                    clarification_result['retrievalConfidence'] = 0.0
+                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                    clarification_result['original_query'] = userMessage
+                    clarification_result['sqlPrecision'] = sql_precision
+                    
+                    log_step("pipeline_complete", {
+                        "route": route,
+                        "confidence": confidence,
+                        "retrieval_confidence": 0.0,
+                        "processing_time_ms": clarification_result['processing_time_ms'],
+                        "requires_clarification": True,
+                        "sql_precision": sql_precision,
+                        "success": True
+                    })
+                    
+                    return clarification_result
             
             # Handle no results (requires fallback)
             if qa_result.get('requires_fallback', False) and qa_result.get('search_method') == 'no_results':
@@ -896,7 +971,7 @@ async def processUserQuery(
                 })
                 
                 internet_result = await generate_internet_search_response(
-                    query=userMessage,
+                    query=analyzed_query,
                     qa_generator=qa_generator,
                     log_step=log_step
                 )
@@ -917,63 +992,70 @@ async def processUserQuery(
                 
                 return internet_result
             
-            # Check if query is ambiguous (missing network specification)
-            # Ambiguous if: user didn't specify network AND (SQL filtered by network OR SQL returned both networks)
-            # Check both original and analyzed query for network mentions
-            user_query_lower = userMessage.lower()
-            analyzed_query_lower = analyzed_query.lower()
-            
-            # Check for explicit network mentions
-            has_network_in_user_query = any(network in user_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
-            has_network_in_analyzed = any(network in analyzed_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
-            
-            # Check if user explicitly asked for "both" networks
-            explicitly_both_networks = (
-                'both' in user_query_lower and 
-                ('polkadot' in user_query_lower or 'kusama' in user_query_lower) and
-                ('polkadot' in analyzed_query_lower or 'kusama' in analyzed_query_lower)
-            )
-            
-            # User specified network if it's in either query OR they explicitly asked for both
-            has_network_specified = has_network_in_user_query or has_network_in_analyzed or explicitly_both_networks
-            
-            # Check if SQL query contains network filter
-            sql_queries = qa_result.get('sql_query', [])
+            # Skip ambiguity check for voting_data - network filtering not possible
+            is_ambiguous_query = False
             sql_has_network_filter = False
-            sql_has_both_networks = False
-            is_aggregate_query = False
-            if sql_queries:
-                if isinstance(sql_queries, list):
-                    sql_query_str = ' '.join(sql_queries).lower()
-                else:
-                    sql_query_str = str(sql_queries).lower()
-                sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
-                # Check if SQL explicitly filters for both networks
-                sql_has_both_networks = 'source_network' in sql_query_str and 'polkadot' in sql_query_str and 'kusama' in sql_query_str
-                # Check if SQL contains aggregate functions (COUNT, SUM, AVG, MAX, MIN)
-                # Aggregate queries are asking for summary statistics, so it's reasonable to return data from both networks
-                is_aggregate_query = any(func in sql_query_str for func in ['count(', 'sum(', 'avg(', 'max(', 'min(', 'count(*)'])
+            if not is_voting_data:
+                # Check if query is ambiguous (missing network specification)
+                # Ambiguous if: user didn't specify network AND (SQL filtered by network OR SQL returned both networks)
+                # Check both original and analyzed query for network mentions
+                user_query_lower = userMessage.lower()
+                analyzed_query_lower = analyzed_query.lower()
+                
+                # Check for explicit network mentions
+                has_network_in_user_query = any(network in user_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
+                has_network_in_analyzed = any(network in analyzed_query_lower for network in ['polkadot', 'kusama', 'dot', 'ksm'])
+                
+                # Check if user explicitly asked for "both" networks
+                explicitly_both_networks = (
+                    'both' in user_query_lower and 
+                    ('polkadot' in user_query_lower or 'kusama' in user_query_lower) and
+                    ('polkadot' in analyzed_query_lower or 'kusama' in analyzed_query_lower)
+                )
+                
+                # User specified network if it's in either query OR they explicitly asked for both
+                has_network_specified = has_network_in_user_query or has_network_in_analyzed or explicitly_both_networks
+                
+                # Check if SQL query contains network filter
+                sql_queries = qa_result.get('sql_query', [])
+                sql_has_both_networks = False
+                is_aggregate_query = False
+                if sql_queries:
+                    if isinstance(sql_queries, list):
+                        sql_query_str = ' '.join(sql_queries).lower()
+                    else:
+                        sql_query_str = str(sql_queries).lower()
+                    sql_has_network_filter = 'source_network' in sql_query_str and ('polkadot' in sql_query_str or 'kusama' in sql_query_str)
+                    # Check if SQL explicitly filters for both networks
+                    sql_has_both_networks = 'source_network' in sql_query_str and 'polkadot' in sql_query_str and 'kusama' in sql_query_str
+                    # Check if SQL contains aggregate functions (COUNT, SUM, AVG, MAX, MIN)
+                    # Aggregate queries are asking for summary statistics, so it's reasonable to return data from both networks
+                    is_aggregate_query = any(func in sql_query_str for func in ['count(', 'sum(', 'avg(', 'max(', 'min(', 'count(*)'])
             
-            # Check if results contain multiple networks (indicating no network filter was applied)
-            # This is a proxy check - if SQL didn't filter by network, results likely contain both
-            results_have_multiple_networks = False
-            if qa_result.get('success', False) and qa_result.get('result_count', 0) > 0:
-                # If SQL doesn't have network filter, assume it returned both networks
-                results_have_multiple_networks = not sql_has_network_filter
-            
-            # Query is ambiguous if:
-            # 1. User didn't specify network (and didn't ask for both), AND
-            # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
-            # 3. SQL got results
-            # NOT ambiguous if: user asked for both networks and SQL has both networks
-            # NOT ambiguous if: SQL is an aggregate query (COUNT, SUM, etc.) - aggregate queries are fine without network specification
-            is_ambiguous_query = (
-                not has_network_specified and 
-                (sql_has_network_filter or results_have_multiple_networks) and
-                qa_result.get('success', False) and 
-                qa_result.get('result_count', 0) > 0 and
-                not is_aggregate_query
-            ) and not (explicitly_both_networks and sql_has_both_networks)
+                # Check if results contain multiple networks (indicating no network filter was applied)
+                # This is a proxy check - if SQL didn't filter by network, results likely contain both
+                results_have_multiple_networks = False
+                if qa_result.get('success', False) and qa_result.get('result_count', 0) > 0:
+                    # If SQL doesn't have network filter, assume it returned both networks
+                    results_have_multiple_networks = not sql_has_network_filter
+                
+                # Query is ambiguous if:
+                # 1. User didn't specify network (and didn't ask for both), AND
+                # 2. (SQL filtered by a network user didn't specify OR SQL returned both networks), AND
+                # 3. SQL got results
+                # NOT ambiguous if: user asked for both networks and SQL has both networks
+                # NOT ambiguous if: SQL is an aggregate query (COUNT, SUM, etc.) - aggregate queries are fine without network specification
+                is_ambiguous_query = (
+                    not has_network_specified and 
+                    (sql_has_network_filter or results_have_multiple_networks) and
+                    qa_result.get('success', False) and 
+                    qa_result.get('result_count', 0) > 0 and
+                    not is_aggregate_query
+                ) and not (explicitly_both_networks and sql_has_both_networks)
+            else:
+                log_step("ambiguity_check_skipped", {
+                    "reason": "voting_data table - network filtering not possible"
+                })
             
             if is_ambiguous_query:
                 log_step("ambiguous_query_detected", {
@@ -1003,47 +1085,55 @@ async def processUserQuery(
                 if final_confidence >= 0.65:
                     decision = "ANSWER"
                 else:
-                    decision = "AMBIGUITY_FLOW"
-                    if not is_clarification_followup:
-                        clarification_result = await generate_clarification_question(
-                            query=userMessage,
-                            route=route,
-                            router_confidence=confidence,
-                            qa_generator=qa_generator,
-                            log_step=log_step
-                        )
-                        
-                        clarification_result['route'] = route
-                        clarification_result['route_confidence'] = confidence
-                        clarification_result['retrievalConfidence'] = retrieval_confidence
-                        clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                        clarification_result['original_query'] = userMessage
-                        clarification_result['semanticCompleteness'] = semantic_score
-                        clarification_result['sqlPrecision'] = qa_result.get('sql_precision', None)
-                        
-                        log_step("dynamic_decision_log", {
-                            "route": "dynamic",
-                            "semanticCompleteness": semantic_score,
-                            "sqlPrecision": qa_result.get('sql_precision', None),
-                            "resultCount": result_count,
-                            "finalConfidence": final_confidence,
-                            "decision": decision
+                    # Skip ambiguity flow for voting_data - network filtering not possible
+                    if is_voting_data:
+                        decision = "ANSWER"
+                        log_step("voting_data_low_confidence_override", {
+                            "final_confidence": final_confidence,
+                            "reason": "voting_data table - network filtering not possible, returning answer anyway"
                         })
-                        
-                        log_step("pipeline_complete", {
-                            "route": route,
-                            "confidence": confidence,
-                            "retrieval_confidence": retrieval_confidence,
-                            "processing_time_ms": clarification_result['processing_time_ms'],
-                            "requires_clarification": True,
-                            "success": True
-                        })
-                        
-                        return clarification_result
+                    else:
+                        decision = "AMBIGUITY_FLOW"
+                        if not is_clarification_followup:
+                            clarification_result = await generate_clarification_question(
+                                query=userMessage,
+                                route=route,
+                                router_confidence=confidence,
+                                qa_generator=qa_generator,
+                                log_step=log_step
+                            )
+                            
+                            clarification_result['route'] = route
+                            clarification_result['route_confidence'] = confidence
+                            clarification_result['retrievalConfidence'] = retrieval_confidence
+                            clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                            clarification_result['original_query'] = userMessage
+                            clarification_result['semanticCompleteness'] = semantic_score
+                            clarification_result['sqlPrecision'] = qa_result.get('sql_precision', None)
+                            
+                            log_step("dynamic_decision_log", {
+                                "route": "dynamic",
+                                "semanticCompleteness": semantic_score,
+                                "sqlPrecision": qa_result.get('sql_precision', None),
+                                "resultCount": result_count,
+                                "finalConfidence": final_confidence,
+                                "decision": decision
+                            })
+                            
+                            log_step("pipeline_complete", {
+                                "route": route,
+                                "confidence": confidence,
+                                "retrieval_confidence": retrieval_confidence,
+                                "processing_time_ms": clarification_result['processing_time_ms'],
+                                "requires_clarification": True,
+                                "success": True
+                            })
+                            
+                            return clarification_result
             else:
                 decision = "FALLBACK_FLOW"
                 internet_result = await generate_internet_search_response(
-                    query=userMessage,
+                    query=analyzed_query,
                     qa_generator=qa_generator,
                     log_step=log_step
                 )
@@ -1096,12 +1186,16 @@ async def processUserQuery(
         elif route == "hybrid":
             log_step("hybrid_route_start", {})
             
+            # Retrieve more chunks initially to ensure Polkassembly docs are included
+            initial_chunks_to_retrieve = max(max_chunks * 2, 10)
             static_chunks = static_embedding_manager.search_similar_chunks(
                 query=analyzed_query,
-                n_results=max_chunks
+                n_results=initial_chunks_to_retrieve
             )
             from .chunks_reranker import rerank_static_chunks
             static_chunks = rerank_static_chunks(static_chunks)
+            # Limit to max_chunks after reranking
+            static_chunks = static_chunks[:max_chunks]
             log_step("hybrid_static_retrieval_complete", {"chunks_count": len(static_chunks)})
             
             hybrid_static_available = len(static_chunks) > 0 if static_chunks else False
@@ -1310,8 +1404,14 @@ async def processUserQuery(
                 })
             elif 0.35 <= final_confidence < 0.65:
                 # AMBIGUITY_FLOW: Medium confidence, ask for clarification
+                # Skip clarification for voting_data - network filtering not possible
                 # Skip clarification if this is already a clarification followup (to avoid loops)
-                if not is_clarification_followup:
+                if is_voting_data:
+                    log_step("voting_data_medium_confidence_override", {
+                        "final_confidence": final_confidence,
+                        "reason": "voting_data table - network filtering not possible, returning answer anyway"
+                    })
+                elif not is_clarification_followup:
                     log_step("confidence_medium_ambiguity", {
                         "final_confidence": final_confidence,
                         "threshold_low": 0.35,
@@ -1396,7 +1496,7 @@ async def processUserQuery(
                     })
                     
                     internet_result = await generate_internet_search_response(
-                        query=userMessage,
+                        query=analyzed_query,
                         qa_generator=qa_generator,
                         log_step=log_step
                     )

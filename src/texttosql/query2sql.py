@@ -814,17 +814,23 @@ class Query2SQL:
                 try:
                     logger.info("Using Gemini as primary LLM for natural response generation from multiple queries")
                     natural_response = self.gemini_client.get_response(prompt)
+                    
+                    # Check if response is an error message (GeminiClient returns error strings instead of raising)
+                    if natural_response and ("Error generating response" in natural_response or "503" in natural_response or "UNAVAILABLE" in natural_response):
+                        logger.warning(f"Gemini returned error response, falling back to GPT-4o: {natural_response[:100]}")
+                        raise Exception("Gemini returned error response")
+                    
                     logger.info("Generated natural language response from multiple queries using Gemini")
                     # Add disclaimer for onchain data
                     disclaimer = "\n\n*The response is derived from on-chain data and may exhibit minor hallucinations. Chain-of-thought reasoning is being integrated to minimize these and enhance factual consistency, which will be available soon.*"
                     return natural_response + disclaimer
                 except Exception as gemini_error:
-                    logger.warning(f"Gemini failed for multiple queries, falling back to OpenAI: {gemini_error}")
+                    logger.warning(f"Gemini failed for multiple queries, falling back to GPT-4o: {gemini_error}")
             
-            # Fallback to OpenAI
-            logger.info("Using OpenAI for natural response generation from multiple queries (fallback)")
+            # Fallback to GPT-4o
+            logger.info("Using GPT-4o for natural response generation from multiple queries (fallback)")
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information. Always show actual data requested - addresses, proposal IDs, titles, amounts, etc. You work with ACTUAL retrieved data from the blockchain database, so always provide the information regardless of dates mentioned in queries. Combine information from multiple queries to provide comprehensive answers. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely. IMPORTANT: ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators. If asked about curator for ReferendumV2, explain that this proposal type doesn't use curators."},
                     {"role": "user", "content": prompt}
@@ -998,7 +1004,12 @@ class Query2SQL:
                     # Use GEMINI_MODEL_NAME for natural response generation
                     natural_response_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
                     natural_response = natural_response_client.get_response(prompt)
-                    # logger.info(f"repsonse from gemini is: {natural_response}")
+                    
+                    # Check if response is an error message (GeminiClient returns error strings instead of raising)
+                    if natural_response and ("Error generating response" in natural_response or "503" in natural_response or "UNAVAILABLE" in natural_response):
+                        logger.warning(f"Gemini returned error response, falling back to GPT-4o: {natural_response[:100]}")
+                        raise Exception("Gemini returned error response")
+                    
                     logger.info("Generated natural language response using Gemini")
                     # Add disclaimer for onchain data
                     disclaimer = "\n\n*The response is derived from on-chain data and may exhibit minor hallucinations. Chain-of-thought reasoning is being integrated to minimize these and enhance factual consistency, which will be available soon.*"
@@ -1007,26 +1018,14 @@ class Query2SQL:
                     # Check if it's a 503 error (model overloaded)
                     error_str = str(gemini_error).lower()
                     if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
-                        logger.warning(f"Gemini model overloaded (503 error) for natural response, falling back to general Gemini model: {gemini_error}")
-                        # Create a fallback Gemini client with the general model
-                        try:
-                            print_model_usage(f"{GEMINI_MODEL_NAME}", "natural response generation fallback (governance data)")
-                            fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
-                            natural_response = fallback_client.get_response(prompt)
-                            logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for natural response generation")
-                            # Add disclaimer for onchain data
-                            disclaimer = "\n\n*The response is derived from on-chain data and may exhibit minor hallucinations. Chain-of-thought reasoning is being integrated to minimize these and enhance factual consistency, which will be available soon.*"
-                            return natural_response + disclaimer
-                        except Exception as fallback_error:
-                            logger.error(f"Fallback Gemini model also failed for natural response: {fallback_error}")
-                            logger.warning(f"Gemini failed, falling back to OpenAI: {gemini_error}")
+                        logger.warning(f"Gemini model overloaded (503 error) for natural response, falling back to GPT-4o: {gemini_error}")
                     else:
-                        logger.warning(f"Gemini failed, falling back to OpenAI: {gemini_error}")
+                        logger.warning(f"Gemini failed, falling back to GPT-4o: {gemini_error}")
             
-            # Fallback to OpenAI
-            logger.info("Using OpenAI for natural response generation (fallback)")
+            # Fallback to GPT-4o
+            logger.info("Using GPT-4o for natural response generation (fallback)")
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a knowledgeable assistant specializing in blockchain governance data. All data you work with is public blockchain information including addresses, proposal IDs, and transaction details. Always show the actual data requested - never refuse due to privacy concerns as this is all public information. Provide clear, helpful explanations with actual values, addresses, and details from the results. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely. IMPORTANT: ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators. If asked about curator for ReferendumV2, explain that this proposal type doesn't use curators."},
                     {"role": "user", "content": prompt}
@@ -1350,6 +1349,7 @@ DATABASE SCHEMA:
             - For general queries: SELECT key columns like "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
+            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -1384,7 +1384,10 @@ DATABASE SCHEMA:
                     import json
                     sql_queries = json.loads(response_content)
                     
-                    if isinstance(sql_queries, str):
+                    # Handle case where LLM returns list of dicts with 'query' and 'description' keys
+                    if isinstance(sql_queries, list) and len(sql_queries) > 0 and isinstance(sql_queries[0], dict):
+                        sql_queries = [item.get('query', str(item)) for item in sql_queries]
+                    elif isinstance(sql_queries, str):
                         sql_queries = [sql_queries]
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
@@ -1531,6 +1534,7 @@ DATABASE SCHEMA:
             - For general queries: SELECT key columns like "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
             - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
+            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -1644,8 +1648,10 @@ Generate the corrected SQL queries as a JSON array:
                     import json
                     sql_queries = json.loads(response_content)
                     
-                    # Ensure it's a list
-                    if isinstance(sql_queries, str):
+                    # Handle case where LLM returns list of dicts with 'query' and 'description' keys
+                    if isinstance(sql_queries, list) and len(sql_queries) > 0 and isinstance(sql_queries[0], dict):
+                        sql_queries = [item.get('query', str(item)) for item in sql_queries]
+                    elif isinstance(sql_queries, str):
                         sql_queries = [sql_queries]
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
@@ -2148,7 +2154,7 @@ class VoteQuery2SQL:
             if has_context:
                 # Extract relevant context from conversation history
                 recent_topics = []
-                for msg in conversation_history[-3:]:  # Last 3 messages
+                for msg in conversation_history[-6:]:  # Last 6 messages (3 conversation turns)
                     if isinstance(msg, dict) and msg.get('role') == 'user':
                         content = msg.get('content', '')
                         if content and len(content) > 10:
@@ -2332,7 +2338,10 @@ SQL Query:
                     import json
                     sql_queries = json.loads(response_content)
                     
-                    if isinstance(sql_queries, str):
+                    # Handle case where LLM returns list of dicts with 'query' and 'description' keys
+                    if isinstance(sql_queries, list) and len(sql_queries) > 0 and isinstance(sql_queries[0], dict):
+                        sql_queries = [item.get('query', str(item)) for item in sql_queries]
+                    elif isinstance(sql_queries, str):
                         sql_queries = [sql_queries]
                     elif not isinstance(sql_queries, list):
                         sql_queries = [str(sql_queries)]
