@@ -342,6 +342,7 @@ Available Routes:
    - "How to" questions about using Polkassembly features
    - Questions about processes, rules, or procedures
    - Questions about delegates, delegation concepts, or how delegation works
+   - Track definitions or theoretical limits without asking for actual on-chain numbers (e.g., "What is the Medium Spender track?")
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
@@ -351,7 +352,7 @@ Available Routes:
    - Questions about blockchain addresses (e.g., "Who is 0x163830...", "What proposals did [address] make", "Show me proposals by [address]")
    - Voting data (voter information, voting power, decisions)
    - Proposal filtering by ID, dates, network, type, status
-   - Aggregations, counts, or summaries of on-chain data
+   - Aggregations, counts, or summaries of on-chain data (e.g., "How many referenda were created in June?", "What is the max spend in the Medium Spender track?")
    - Questions asking to RETRIEVE or DISPLAY specific data from the blockchain
    - Questions asking for specific delegate addresses, vote counts, or on-chain delegate metrics
    - URLs to pages (e.g., "http://polkadot.polkassembly.io/referenda/1781" = very specific query for referenda 1781 on Polkadot)
