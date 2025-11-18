@@ -1097,7 +1097,8 @@ async def processUserQuery(
                         query=analyzed_query,
                         qa_generator=qa_generator,
                         log_step=log_step,
-                        route=route
+                        route=route,
+                        conversation_history=conversationHistory
                     )
                     
                     internet_result['route'] = route
@@ -1315,7 +1316,8 @@ async def processUserQuery(
                         query=analyzed_query,
                         qa_generator=qa_generator,
                         log_step=log_step,
-                        route=route
+                        route=route,
+                        conversation_history=conversationHistory
                     )
                     
                     internet_result['route'] = route

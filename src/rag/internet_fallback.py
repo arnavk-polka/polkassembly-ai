@@ -57,7 +57,7 @@ def _build_contextual_search_query_heuristic(query: str, route: Optional[str]) -
     return base
 
 
-async def _build_contextual_search_query(query: str, route: Optional[str], qa_generator, log_step) -> str:
+async def _build_contextual_search_query(query: str, route: Optional[str], qa_generator, log_step, conversation_history: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Use GPT-3.5 Turbo to enrich the search query with Polkassembly/OpenGov context.
     Falls back to heuristic builder if the LLM call fails or client unavailable.
@@ -66,17 +66,35 @@ async def _build_contextual_search_query(query: str, route: Optional[str], qa_ge
         log_step("contextual_query_llm_skipped", {"reason": "no_openai_client"}, "warning")
         return _build_contextual_search_query_heuristic(query, route)
     
+    # Build conversation context if available
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        recent_messages = conversation_history[-6:]  # Last 6 messages for context
+        context_parts = []
+        for msg in recent_messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '') or msg.get('message', '')
+                if content and len(str(content).strip()) > 5:
+                    role_display = role if role else 'user'
+                    content_str = str(content)[:300]  # Limit to 300 chars per message
+                    context_parts.append(f"{role_display}: {content_str}")
+        if context_parts:
+            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nIMPORTANT: Use the conversation history to understand what the user is really asking about. If the conversation mentions specific topics, proposals, referenda, tracks, or networks, include those in the search query. For example, if the conversation was about 'vitro connect referenda' and the current query is 'Yes it is a kusama referenda', the search should include 'vitro connect' and 'kusama'."
+    
     system_prompt = (
         "You rewrite user queries into precise web-search strings focused on Polkadot/Kusama governance. "
         "Return ONLY the rewritten query without commentary."
     )
     user_prompt = f"""
 Original user query: "{query}"
-Route category: "{route or 'unknown'}"
+Route category: "{route or 'unknown'}"{conversation_context}
 
 Task:
 - Add context so the search targets Polkassembly, Polkadot/Kusama OpenGov, referendum/voting/bounty data, etc.
 - Include network names (Polkadot, Kusama) or terms like "Polkassembly", "OpenGov", "referendum" when relevant.
+- If conversation history is provided, use it to understand the full context of what the user is asking about.
+- Include specific topics, proposal names, track names, or other details mentioned in the conversation history.
 - If the user already mentions unrelated topics, keep them but still bias towards blockchain governance sources.
 - Output ONE enhanced search query string. No explanations, no quotes.
 """
@@ -104,7 +122,8 @@ async def generate_internet_search_response(
     query: str,
     qa_generator,
     log_step,
-    route: Optional[str] = None
+    route: Optional[str] = None,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Generate response using internet search when no data is available.
@@ -113,11 +132,13 @@ async def generate_internet_search_response(
         query: The user's query
         qa_generator: QA generator instance
         log_step: Logging function
+        route: The route category (dynamic, static, etc.)
+        conversation_history: Optional conversation history for context
     
     Returns:
         Dictionary with answer from internet search and metadata
     """
-    contextual_query = await _build_contextual_search_query(query, route, qa_generator, log_step)
+    contextual_query = await _build_contextual_search_query(query, route, qa_generator, log_step, conversation_history)
     
     log_step("internet_fallback_start", {
         "query_preview": query[:100],
@@ -128,10 +149,26 @@ async def generate_internet_search_response(
     try:
         from ..utils.web_search import search_tavily
         
+        # Build conversation context for the answer generation
+        conversation_context_for_answer = ""
+        if conversation_history and len(conversation_history) > 0:
+            recent_messages = conversation_history[-6:]  # Last 6 messages for context
+            context_parts = []
+            for msg in recent_messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '') or msg.get('message', '')
+                    if content and len(str(content).strip()) > 5:
+                        role_display = role if role else 'user'
+                        content_str = str(content)[:300]  # Limit to 300 chars per message
+                        context_parts.append(f"{role_display}: {content_str}")
+            if context_parts:
+                conversation_context_for_answer = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse this conversation history to understand the full context of what the user is asking about."
+        
         internet_prompt = f"""
 You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
 
-A user has asked: "{query}"
+A user has asked: "{query}"{conversation_context_for_answer}
 
 I have no context or data about this query in my system. Please search the internet and provide the best answer you can find.
 
@@ -139,6 +176,7 @@ Important guidelines:
 - Provide a helpful, accurate answer based on internet search results
 - Focus on Polkadot/Kusama/blockchain governance topics if relevant
 - Keep the response concise and informative
+- If conversation history is provided, use it to understand the full context of what the user is asking about
 - If the query is not related to Polkadot/Kusama, still provide a helpful answer
 - Use the search results to inform your response
 - DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
