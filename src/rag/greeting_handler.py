@@ -153,7 +153,7 @@ async def handle_generic_query_llm(
                         role_display = role if role else 'user'
                         context_parts.append(f"{role_display}: {content[:300]}")
             if context_parts:
-                conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse this conversation history to understand what the user is referring to. If the user asks questions like 'what am i talking about?' or 'what were we discussing?', answer based on the conversation history above."
+                conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their query."
         
         generic_prompt = f"""
 You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
