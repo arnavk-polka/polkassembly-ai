@@ -11,7 +11,6 @@ import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from .confidence import compute_retrieval_confidence
 from .greeting_handler import handle_generic_query_llm
 from .clarification import generate_clarification_question
 from .internet_fallback import generate_internet_search_response
@@ -60,7 +59,7 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
                     content_str = str(content)[:500]  # Increased from 200 to 500
                     context_parts.append(f"{role_display}: {content_str}")
         if context_parts:
-            conversation_context = f"\n\nCONVERSATION HISTORY (for context):\n" + "\n".join(context_parts) + "\n\nCRITICAL: Use this conversation history to understand what the user is referring to. If the conversation history mentions specific proposals, referenda, topics, tracks (like 'Medium Spender', 'BigSpender'), categories, or IDs, the current query is likely a follow-up referring to similar items and is NOT ambiguous. For example, if the conversation was about 'Medium Spender' and the user asks 'how about bigspender', this is a clear follow-up query about a similar topic (BigSpender track) and is NOT ambiguous."
+            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their current query."
             logger.info(f"Ambiguity check - Including conversation history with {len(context_parts)} messages for query: '{query[:50]}'")
         else:
             logger.info(f"Ambiguity check - No conversation history available for query: '{query[:50]}'")
@@ -70,26 +69,27 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
 Your ONLY job:
 
 Decide if the user's query is missing a REQUIRED identifier for a **single, specific on-chain item** (referendum, proposal, bounty, treasury item, etc.).
+
+CRITICAL: Procedural questions ("how to", "how do I", "can I", etc.) are NEVER ambiguous - they ask about processes, not specific items.
+
 You must output ONLY one word: "true" or "false" (lowercase, no punctuation).
 
 User Query:
 
-"{query}"{sql_context}{conversation_context}
+"{query}"{conversation_context}
 
 ---
 
 DECISION RULES (follow these in order):
 
 1) IS THIS A CONVERSATIONAL QUERY REFERENCING THE CONVERSATION?
-   - Examples: "what am i talking about?", "what were we discussing?", "remind me", 
-     "what did you just say?", "what was that about?", "can you repeat that?"
+   - Examples: "what am i talking about?", "what were we discussing?", "remind me"
    - These queries are asking about the conversation history itself, NOT about a specific on-chain item.
    - If conversation history is available, these queries are NOT ambiguous - they can be answered from context.
    → In this case, answer "false".
 
 1b) IS THIS A FOLLOW-UP QUERY THAT REFERENCES THE CONVERSATION CONTEXT?
-   - Look for patterns like: "how about X", "what about X", "show me X", "tell me about X", 
-     "what about the X", "and X?", "X too", "also X", "X as well"
+   - Look for patterns like: "how about X", "what about X", "show me X", "tell me about X"
    - If conversation history is available AND the query references a similar topic/category/track/type
      that was discussed in the conversation, this is a CLEAR follow-up query and is NOT ambiguous.
    - Example: Previous query was about "Medium Spender" track → Current query "how about bigspender" 
@@ -103,10 +103,15 @@ DECISION RULES (follow these in order):
    → In this case, answer "false".
 
 3) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE?
-   - Phrases like "how to", "how do I", "what is", "explain", "guide", "steps",
+   - Phrases like "how to", "how do I", "how can I", "can I", "what is", "explain", "guide", "steps",
      "process", "help me understand" point to documentation/static info.
-   - These are NOT ambiguous unless the user simultaneously refers to
-     one specific on-chain item without providing its ID.
+   - CRITICAL: If the query contains "how to", "how do I", "how can I", "can I", it is asking about a PROCESS or PROCEDURE.
+   - These are ALWAYS NOT ambiguous - they are asking about HOW to do something, not asking for details about a specific item.
+   - Even if the query mentions "my ref", "my proposal", "the referendum", etc., if it's asking "how to" do something,
+     it's a procedural question and is NOT ambiguous.
+   - Examples: "how to cancel my ref" = asking about cancellation process, NOT asking for ref details
+   - Examples: "I placed decision deposit, how to cancel my ref" = asking how to cancel, NOT asking for ref details
+   - Examples: "can I cancel my proposal" = asking about possibility/process, NOT asking for proposal details
    → In this case, answer "false".
 
 4) IF NOT A HOW-TO, IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
@@ -115,7 +120,7 @@ DECISION RULES (follow these in order):
        "this treasury proposal") - these refer to a specific item without identifier
      - CRITICAL: Topic/filter keywords + plural nouns ("referenda", "proposals") mean "show me the data for that topic"
        and should be treated as DATA retrieval (still not ambiguous, but clearly **dynamic**, not static docs).
-       * Example: "tell me about the #topic# referenda" → needs on-chain data for that topic (dynamic route)
+       * Example: "tell me about the #topic# referenda" → needs on-chain data for that topic (topics like polkabot.ai, vitro connect etc)
        * Example: "show me the staking proposals" → data listing (dynamic)
      - Pure topic/filter keywords without entity nouns can remain static.
 
@@ -136,7 +141,8 @@ DECISION RULES (follow these in order):
 
 6) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
 
-   - The user is clearly asking about ONE specific item (Step 4 = yes)
+   - The query is NOT a procedural question (NOT "how to", "how do I", "can I", etc.) - if it is procedural, it's NOT ambiguous
+   - AND the user is clearly asking about ONE specific item (Step 4 = yes)
    - AND they use vague references like "this", "that", "the" WITHOUT a topic/filter keyword
    - AND there is NO numeric ID, NO URL with ID, and NO clear unique identifier
    - AND there is NO topic/filter keyword (like "polkabot.ai", "staking", etc.)
@@ -144,6 +150,10 @@ DECISION RULES (follow these in order):
    → ONLY in this case answer "true".
 
 IMPORTANT CONSTRAINTS:
+
+- Procedural questions ("how to", "how do I", "how can I", "can I", etc.) are NEVER ambiguous.
+  They ask about processes/procedures, not specific items. Even if they mention "my ref" or "the proposal",
+  they are asking HOW to do something, not asking for details about a specific item.
 
 - The network (Polkadot vs Kusama) is ALWAYS OPTIONAL.
   Missing network MUST NEVER make the query ambiguous.
@@ -161,10 +171,10 @@ EXAMPLES (for your own understanding):
 
 Should be "true" (ambiguous):
 
-- "show me details about this referenda"
-- "what are the votes for that proposal"
-- "tell me about the treasury proposal"
-- "who is the curator of that bounty"
+- "show me details about this referenda" (vague reference "this" without identifier)
+- "what are the votes for that proposal" (vague reference "that" without identifier)
+- "tell me about the treasury proposal" (vague reference "the" without identifier or context)
+- "who is the curator of that bounty" (vague reference "that" without identifier)
 
 Should be "false" (not ambiguous):
 
@@ -176,17 +186,17 @@ Should be "false" (not ambiguous):
 - "list treasury proposals"
 - "show me referenda 123"
 - "what are the votes for proposal 456"
-- "show me active referenda"
-- "find bounties"
-- "how many voters"
 - "show me proposals on Polkadot"
 - "show proposals about staking"
-- "tell me about the polkabot.ai referenda" (topic + referenda implies on-chain data filter → route dynamic)
+- "tell me about the polkabot.ai/any other referenda" (topic + referenda implies on-chain data filter → route dynamic)
 - "show me the staking proposals" (has topic "staking", so it's a listing query)
+- "how many voters" (counting/aggregate question)
 - "how many unique voters were there in November 2025"
 - "how to vote"
 - "how do I delegate my votes"
-- "explain conviction voting"
+- "I placed decision deposit already, how to cancel my ref to get it back" (procedural question - asking HOW to cancel, NOT asking for ref details)
+- "how to cancel my ref" (procedural question - asking about cancellation process)
+- "can I cancel my proposal" (procedural question - asking about possibility/process)
 Now, after applying the rules above, respond with ONLY:
 true
 or
@@ -264,7 +274,7 @@ async def combine_query_with_clarification(
                     role_display = role if role else 'user'
                     context_parts.append(f"{role_display}: {content[:150]}")
         if context_parts:
-            conversation_context = f"\n\nRecent conversation context (to understand what the original query refers to):\n" + "\n".join(context_parts)
+            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand the full context of what the user is asking about."
     
     combination_prompt = f"""
 You are helping to combine a user's original query with their clarification response.
@@ -276,29 +286,11 @@ Clarification question that was asked: "{clarification_question}"
 User's clarification response: "{clarification_response}"{conversation_context}
 
 Your task:
-- Understand what the user's clarification response means in the context of the clarification question
-- Use the conversation context to understand what the original query refers to (e.g., if original query is "what about october", use context to understand it's about "unique voters")
-- Create a single, clear, and coherent query that combines both the original intent and the clarification
-- Make it natural and well-formed
-- Preserve the original intent while incorporating the clarification details
-- Do NOT add any explanations or meta-commentary - just output the combined query
-
-Examples:
-Original: "show me proposals"
-Clarification question: "Are you looking for information on the Polkadot or Kusama network?"
-Clarification response: "Polkadot"
-Combined: "show me proposals on Polkadot network"
-
-Original: "how many unique voters were there in november 2025"
-Clarification question: "Are you looking for information on the Polkadot or Kusama network?"
-Clarification response: "both"
-Combined: "how many unique voters were there in november 2025 on both Polkadot and Kusama networks"
-
-Original: "what about october"
-Context: Previous conversation was about "How many unique voters were there in November 2025?"
-Clarification question: "Are you asking about Polkadot or Kusama network in October?"
-Clarification response: "Kusama"
-Combined: "How many unique voters were there in October 2025 on the Kusama network?"
+- Preserve ALL keywords, topics, and specific terms from the original query (e.g., "vitro connect", proposal names, track names, etc.)
+- The clarification response provides ADDITIONAL context (like network name, specific ID, etc.), NOT replacing the original topic
+- Use the conversation history to understand the full context
+- Create a single, clear, and coherent query that combines both the original intent AND the clarification
+- Output ONLY the combined query, no explanations
 
 Now create the combined query:
 """
@@ -475,19 +467,10 @@ async def detect_and_handle_clarification_response(
     original_route = route_result.get("route", "dynamic")
     original_router_confidence = route_result.get("confidence", 0.8)
     
-    # Use LLM to intelligently combine original query with clarification response
-    # Pass the clarification question and conversation history so the LLM understands context
-    combined_query = await combine_query_with_clarification(
-        original_query,
-        userMessage,
-        last_content,  # The clarification question
-        qa_generator,
-        log_step,
-        conversationHistory  # Pass full conversation history for context
-    )
-    
+    # Use the clarification response directly as the new query
+    # Conversation history will be provided to the router so it can understand context
     return {
-        'combined_query': combined_query,
+        'combined_query': userMessage,  # Use clarification response directly
         'original_query': original_query,
         'original_route': original_route,
         'original_router_confidence': original_router_confidence,
@@ -572,7 +555,7 @@ async def route_query_llm(
                         role_display = role if role else 'user'
                         context_parts.append(f"{role_display}: {content[:100]}")
             if context_parts:
-                conversation_context = f"\n\nRecent conversation context:\n" + "\n".join(context_parts)
+                conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their query."
         
         routing_prompt = f"""
 You are a query router. Analyze this user query and determine the best route for answering it.
@@ -743,10 +726,6 @@ async def processUserQuery(
         )
         
         is_clarification_followup = clarification_info is not None
-        original_query_for_route = userMessage
-        combined_query = userMessage
-        stored_route = None
-        stored_router_confidence = None
         is_voting_data = False  # Track if query is for voting_data table
         is_ambiguous_query = False  # Track if query truly needs clarification (missing required parameter)
         
@@ -755,23 +734,18 @@ async def processUserQuery(
                 "original_query": clarification_info['original_query'],
                 "original_route": clarification_info.get('original_route', 'unknown'),
                 "original_router_confidence": clarification_info.get('original_router_confidence', 'unknown'),
-                "clarification_response": clarification_info['clarification_response'],
-                "combined_query_preview": clarification_info['combined_query'][:100]
+                "clarification_response": clarification_info['clarification_response']
             })
-            # Use the stored original route and router confidence (don't re-route)
-            stored_route = clarification_info.get('original_route')
-            stored_router_confidence = clarification_info.get('original_router_confidence', 0.7)
-            original_query_for_route = clarification_info['original_query']
-            combined_query = clarification_info['combined_query']
         
         # Analyze query with memory FIRST, then route on the analyzed query
-        # Use combined query if this is a clarification followup, otherwise use original
+        # For clarification follow-ups, use the clarification response directly
         if is_clarification_followup:
-            analyzed_query = combined_query
+            analyzed_query = userMessage  # Use clarification response directly
         else:
             analyzed_query = userMessage
         
-        if conversationHistory and qa_generator and not is_clarification_followup:
+        # Run query analysis with conversation history for all queries
+        if conversationHistory and qa_generator:
             log_step("query_analysis_start", {})
             try:
                 # Use analyzed_query (which may be combined) for memory analysis
@@ -818,14 +792,12 @@ async def processUserQuery(
                 
                 clarification_result['route'] = 'ambiguous_pre_route'
                 clarification_result['route_confidence'] = 0.0
-                clarification_result['retrievalConfidence'] = 0.0
                 clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                 clarification_result['original_query'] = userMessage
                 
                 log_step("pipeline_complete", {
                     "route": "ambiguous_pre_route",
                     "confidence": 0.0,
-                    "retrieval_confidence": 0.0,
                     "processing_time_ms": clarification_result['processing_time_ms'],
                     "requires_clarification": True,
                     "success": True
@@ -835,18 +807,22 @@ async def processUserQuery(
             else:
                 is_ambiguous_query = False
         
-        # Use stored route if available (from clarification followup), otherwise route normally
-        if stored_route and stored_route in ['static', 'dynamic', 'hybrid', 'generic']:
-            log_step("routing_using_stored_route", {
+        # For clarification follow-ups, always re-route with conversation history
+        # The router will use conversation history to understand the full context
+        if is_clarification_followup:
+            log_step("routing_clarification_followup", {
                 "is_clarification_followup": is_clarification_followup,
-                "stored_route": stored_route,
-                "stored_router_confidence": stored_router_confidence,
-                "combined_query_preview": combined_query[:100]
+                "query_preview": analyzed_query[:100],
+                "note": "Re-routing clarification response with conversation history for context"
             })
-            route = stored_route
-            confidence = stored_router_confidence
-            # Use the combined query as the analyzed query - don't re-route
-            analyzed_query = combined_query
+            # Re-route with the clarification response and conversation history
+            route_result = await route_query_llm(
+                analyzed_query,
+                conversationHistory,
+                qa_generator
+            )
+            route = route_result["route"]
+            confidence = route_result["confidence"]
         else:
             log_step("routing_start", {
                 "is_clarification_followup": is_clarification_followup,
@@ -859,19 +835,6 @@ async def processUserQuery(
             )
             route = route_result["route"]
             confidence = route_result["confidence"]
-
-            # Heuristic override: if LLM chose static but the query clearly looks like a data request,
-            # force the inferred dynamic route so referenda/proposal queries don't get stuck in docs.
-            if route == "static":
-                inferred_route = fallback_route_inference(analyzed_query.lower())
-                if inferred_route in ["dynamic", "hybrid"]:
-                    log_step("router_override_applied", {
-                        "original_route": route,
-                        "inferred_route": inferred_route,
-                        "confidence_before": confidence
-                    })
-                    route = inferred_route
-                    confidence = min(confidence, 0.65)  # downgrade confidence when overriding
         log_step("routing_complete", {
             "route": route,
             "confidence": confidence,
@@ -896,32 +859,9 @@ async def processUserQuery(
             static_chunks = static_chunks[:max_chunks]
             log_step("static_retrieval_complete", {"chunks_count": len(static_chunks)})
             
-            retrieval_confidence, semantic_completeness = await compute_retrieval_confidence(
-                route=route,
-                router_confidence=confidence,
-                static_chunks=static_chunks,
-                query=analyzed_query,
-                qa_generator=qa_generator
-            )
-            
-            # Use semantic_completeness from compute_retrieval_confidence (or default to 0.5)
-            if semantic_completeness is None:
-                semantic_completeness = 0.5
-            
-            static_similarity = 0.0
+            # Simple decision logic: if chunks found, answer; otherwise fallback
             if static_chunks and len(static_chunks) > 0:
-                similarity_scores = [chunk.get('similarity_score', 0.0) for chunk in static_chunks]
-                avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
-                max_similarity = max(similarity_scores) if similarity_scores else 0.0
-                static_similarity = (avg_similarity * 0.5 + max_similarity * 0.5)
-            
-            chunk_count_factor = min(len(static_chunks) / 5.0, 1.0) if static_chunks else 0.0
-            final_static_confidence = retrieval_confidence
-            
-            # Decision logic for static route
-            decision = None
-            if final_static_confidence >= 0.45:
-                decision = "ANSWER"
+                # Chunks found - proceed with answer
                 qa_result = await qa_generator.generate_answer(
                     query=analyzed_query,
                     chunks=static_chunks,
@@ -932,190 +872,38 @@ async def processUserQuery(
                     route_confidence=confidence
                 )
                 
-                log_step("static_confidence_decision", {
-                    "route": "static",
-                    "routerConfidence": confidence,
-                    "semanticCompleteness": semantic_completeness,
-                    "staticSimilarity": static_similarity,
-                    "chunkCountFactor": chunk_count_factor,
-                    "finalStaticConfidence": final_static_confidence,
-                    "decision": decision
-                })
-                
                 log_step("static_route_complete", {
                     "chunks_used": qa_result.get('chunks_used', 0),
-                    "search_method": qa_result.get('search_method', 'unknown'),
-                    "retrieval_confidence": retrieval_confidence
+                    "search_method": qa_result.get('search_method', 'unknown')
                 })
-            elif 0.35 <= final_static_confidence < 0.45:
-                decision = "AMBIGUITY_FLOW"
-                if not is_clarification_followup:
-                    log_step("static_confidence_decision", {
-                        "route": "static",
-                        "routerConfidence": confidence,
-                        "semanticCompleteness": semantic_completeness,
-                        "staticSimilarity": static_similarity,
-                        "chunkCountFactor": chunk_count_factor,
-                        "finalStaticConfidence": final_static_confidence,
-                        "decision": decision
-                    })
-                    
-                    clarification_result = await generate_clarification_question(
-                        query=userMessage,
-                        route=route,
-                        router_confidence=confidence,
-                        qa_generator=qa_generator,
-                        log_step=log_step,
-                        conversation_history=conversationHistory
-                    )
-                    
-                    clarification_result['route'] = route
-                    clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = retrieval_confidence
-                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                    clarification_result['original_query'] = userMessage
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": retrieval_confidence,
-                        "processing_time_ms": clarification_result['processing_time_ms'],
-                        "requires_clarification": True,
-                        "success": True
-                    })
-                    
-                    return clarification_result
-                else:
-                    # Already a clarification followup - proceed with answer
-                    qa_result = await qa_generator.generate_answer(
-                        query=analyzed_query,
-                        chunks=static_chunks,
-                        custom_prompt=custom_prompt,
-                        user_id=user_id,
-                        conversation_history=conversationHistory,
-                        route=route,
-                        route_confidence=confidence
-                    )
-                    
-                    log_step("static_confidence_decision", {
-                        "route": "static",
-                        "routerConfidence": confidence,
-                        "semanticCompleteness": semantic_completeness,
-                        "staticSimilarity": static_similarity,
-                        "chunkCountFactor": chunk_count_factor,
-                        "finalStaticConfidence": final_static_confidence,
-                        "decision": decision,
-                        "note": "Proceeding despite medium confidence as this is already a clarification followup"
-                    })
-                    
-                    log_step("static_route_complete", {
-                        "chunks_used": qa_result.get('chunks_used', 0),
-                        "search_method": qa_result.get('search_method', 'unknown'),
-                        "retrieval_confidence": retrieval_confidence
-                    })
             else:
-                if static_chunks and len(static_chunks) > 0:
-                    decision = "AMBIGUITY_FLOW"
-                    if not is_clarification_followup:
-                        log_step("static_confidence_decision", {
-                            "route": "static",
-                            "routerConfidence": confidence,
-                            "semanticCompleteness": semantic_completeness,
-                            "staticSimilarity": static_similarity,
-                            "chunkCountFactor": chunk_count_factor,
-                            "finalStaticConfidence": final_static_confidence,
-                            "decision": decision,
-                            "note": "Low confidence but chunks found - using ambiguity flow instead of internet fallback"
-                        })
-                        
-                        clarification_result = await generate_clarification_question(
-                            query=userMessage,
-                            route=route,
-                            router_confidence=confidence,
-                            qa_generator=qa_generator,
-                            log_step=log_step,
-                            conversation_history=conversationHistory
-                        )
-                        
-                        clarification_result['route'] = route
-                        clarification_result['route_confidence'] = confidence
-                        clarification_result['retrievalConfidence'] = retrieval_confidence
-                        clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                        clarification_result['original_query'] = userMessage
-                        
-                        log_step("pipeline_complete", {
-                            "route": route,
-                            "confidence": confidence,
-                            "retrieval_confidence": retrieval_confidence,
-                            "processing_time_ms": clarification_result['processing_time_ms'],
-                            "requires_clarification": True,
-                            "success": True
-                        })
-                        
-                        return clarification_result
-                    else:
-                        qa_result = await qa_generator.generate_answer(
-                            query=analyzed_query,
-                            chunks=static_chunks,
-                            custom_prompt=custom_prompt,
-                            user_id=user_id,
-                            conversation_history=conversationHistory,
-                            route=route,
-                            route_confidence=confidence
-                        )
-                        
-                        log_step("static_confidence_decision", {
-                            "route": "static",
-                            "routerConfidence": confidence,
-                            "semanticCompleteness": semantic_completeness,
-                            "staticSimilarity": static_similarity,
-                            "chunkCountFactor": chunk_count_factor,
-                            "finalStaticConfidence": final_static_confidence,
-                            "decision": decision,
-                            "note": "Low confidence but chunks found - proceeding with answer as clarification followup"
-                        })
-                        
-                        log_step("static_route_complete", {
-                            "chunks_used": qa_result.get('chunks_used', 0),
-                            "search_method": qa_result.get('search_method', 'unknown'),
-                            "retrieval_confidence": retrieval_confidence
-                        })
-                else:
-                    decision = "FALLBACK_FLOW"
-                    log_step("static_confidence_decision", {
-                        "route": "static",
-                        "routerConfidence": confidence,
-                        "semanticCompleteness": semantic_completeness,
-                        "staticSimilarity": static_similarity,
-                        "chunkCountFactor": chunk_count_factor,
-                        "finalStaticConfidence": final_static_confidence,
-                        "decision": decision,
-                        "note": "No chunks found - falling back to internet search"
-                    })
-                    
-                    internet_result = await generate_internet_search_response(
-                        query=analyzed_query,
-                        qa_generator=qa_generator,
-                        log_step=log_step,
-                        route=route,
-                        conversation_history=conversationHistory
-                    )
-                    
-                    internet_result['route'] = route
-                    internet_result['route_confidence'] = confidence
-                    internet_result['retrievalConfidence'] = retrieval_confidence
-                    internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": retrieval_confidence,
-                        "processing_time_ms": internet_result['processing_time_ms'],
-                        "internet_fallback": True,
-                        "success": True
-                    })
-                    
-                    return internet_result
+                # No chunks found - fallback to internet search
+                log_step("static_no_chunks_fallback", {
+                    "route": "static",
+                    "note": "No chunks found - falling back to internet search"
+                })
+                
+                internet_result = await generate_internet_search_response(
+                    query=analyzed_query,
+                    qa_generator=qa_generator,
+                    log_step=log_step,
+                    route=route,
+                    conversation_history=conversationHistory
+                )
+                
+                internet_result['route'] = route
+                internet_result['route_confidence'] = confidence
+                internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                
+                log_step("pipeline_complete", {
+                    "route": route,
+                    "confidence": confidence,
+                    "processing_time_ms": internet_result['processing_time_ms'],
+                    "internet_fallback": True,
+                    "success": True
+                })
+                
+                return internet_result
             
         elif route == "dynamic":
             log_step("dynamic_route_start", {})
@@ -1143,7 +931,6 @@ async def processUserQuery(
             requires_clarification = qa_result.get('requires_clarification', False)
             requires_fallback = qa_result.get('requires_fallback', False)
             result_count = qa_result.get('result_count', 0)
-            sql_precision = qa_result.get('sql_precision')
             
             # Decision logic based on validator_verdict as primary signal
             decision = None
@@ -1172,7 +959,6 @@ async def processUserQuery(
                     
                     clarification_result['route'] = route
                     clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = 0.0
                     clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                     clarification_result['original_query'] = userMessage
                     clarification_result['validator_verdict'] = validator_verdict
@@ -1181,7 +967,6 @@ async def processUserQuery(
                     log_step("pipeline_complete", {
                         "route": route,
                         "confidence": confidence,
-                        "retrieval_confidence": 0.0,
                         "processing_time_ms": clarification_result['processing_time_ms'],
                         "requires_clarification": True,
                         "validator_verdict": validator_verdict,
@@ -1214,7 +999,6 @@ async def processUserQuery(
                 
                 internet_result['route'] = route
                 internet_result['route_confidence'] = confidence
-                internet_result['retrievalConfidence'] = 0.0
                 internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                 internet_result['validator_verdict'] = validator_verdict
                 internet_result['validator_reason'] = validator_reason
@@ -1222,7 +1006,6 @@ async def processUserQuery(
                 log_step("pipeline_complete", {
                     "route": route,
                     "confidence": confidence,
-                    "retrieval_confidence": 0.0,
                     "processing_time_ms": internet_result['processing_time_ms'],
                     "internet_fallback": True,
                     "validator_verdict": validator_verdict,
@@ -1283,7 +1066,6 @@ async def processUserQuery(
                         
                         clarification_result['route'] = route
                         clarification_result['route_confidence'] = confidence
-                        clarification_result['retrievalConfidence'] = 0.0
                         clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                         clarification_result['original_query'] = userMessage
                         clarification_result['validator_verdict'] = validator_verdict
@@ -1292,7 +1074,6 @@ async def processUserQuery(
                         log_step("pipeline_complete", {
                             "route": route,
                             "confidence": confidence,
-                            "retrieval_confidence": 0.0,
                             "processing_time_ms": clarification_result['processing_time_ms'],
                             "requires_clarification": True,
                             "validator_verdict": validator_verdict,
@@ -1322,7 +1103,6 @@ async def processUserQuery(
                     
                     internet_result['route'] = route
                     internet_result['route_confidence'] = confidence
-                    internet_result['retrievalConfidence'] = 0.0
                     internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
                     internet_result['validator_verdict'] = validator_verdict
                     internet_result['validator_reason'] = validator_reason
@@ -1330,7 +1110,6 @@ async def processUserQuery(
                     log_step("pipeline_complete", {
                         "route": route,
                         "confidence": confidence,
-                        "retrieval_confidence": 0.0,
                         "processing_time_ms": internet_result['processing_time_ms'],
                         "internet_fallback": True,
                         "validator_verdict": validator_verdict,
@@ -1350,18 +1129,6 @@ async def processUserQuery(
                         "note": "Proceeding with answer (validator_verdict missing, no flags set)"
                     })
             
-            # Calculate confidence for logging/metrics
-            retrieval_confidence, _ = await compute_retrieval_confidence(
-                route=route,
-                router_confidence=confidence,
-                sql_result_count=result_count,
-                sql_success=qa_result.get('success', False),
-                is_ambiguous_query=False,
-                query=analyzed_query,
-                sql_query=qa_result.get('sql_query', []),
-                qa_generator=qa_generator
-            )
-            
             # Log final decision summary
             log_step("dynamic_route_decision", {
                 "validator_verdict": validator_verdict,
@@ -1369,12 +1136,8 @@ async def processUserQuery(
                 "result_count": result_count,
                 "requires_clarification": requires_clarification,
                 "requires_fallback": requires_fallback,
-                "decision": decision,
-                "sql_precision": sql_precision
+                "decision": decision
             })
-            
-            qa_result['sqlPrecision'] = sql_precision
-            qa_result['retrievalConfidence'] = retrieval_confidence
             qa_result['route'] = route
             qa_result['route_confidence'] = confidence
             
@@ -1408,27 +1171,11 @@ async def processUserQuery(
             
             hybrid_dynamic_available = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
             
-            retrieval_confidence, _ = await compute_retrieval_confidence(
-                route=route,
-                router_confidence=confidence,
-                static_chunks=static_chunks,
-                sql_result_count=qa_result.get('result_count', 0),
-                sql_success=qa_result.get('success', False),
-                hybrid_static_available=hybrid_static_available,
-                hybrid_dynamic_available=hybrid_dynamic_available,
-                is_ambiguous_query=False,  # Already checked, so set to False
-                query=analyzed_query,
-                sql_query=qa_result.get('sql_query', []),
-                qa_generator=qa_generator
-            )
-            
             log_step("hybrid_route_complete", {
                 "chunks_used": qa_result.get('chunks_used', 0),
                 "search_method": qa_result.get('search_method', 'unknown'),
-                "retrieval_confidence": retrieval_confidence,
                 "hybrid_static_available": hybrid_static_available,
-                "hybrid_dynamic_available": hybrid_dynamic_available,
-                "is_ambiguous_query": is_ambiguous_query
+                "hybrid_dynamic_available": hybrid_dynamic_available
             })
             
         elif route == "generic":
@@ -1466,7 +1213,6 @@ async def processUserQuery(
         if route == "static":
             qa_result['route'] = route
             qa_result['route_confidence'] = confidence
-            qa_result['retrievalConfidence'] = retrieval_confidence
             qa_result['processing_time_ms'] = processing_time
             if is_clarification_followup and clarification_info:
                 qa_result['is_clarification_followup'] = True
@@ -1475,71 +1221,12 @@ async def processUserQuery(
             log_step("pipeline_complete", {
                 "route": route,
                 "confidence": confidence,
-                "retrieval_confidence": retrieval_confidence,
                 "processing_time_ms": processing_time,
                 "is_clarification_followup": is_clarification_followup,
                 "success": True
             })
             
             return qa_result
-        
-        # retrieval_confidence may have been calculated in route-specific blocks above
-        # Check if it exists and is not None, otherwise calculate it
-        if route != "generic":
-            try:
-                # Check if retrieval_confidence was already calculated in route block
-                if retrieval_confidence is None:
-                    raise NameError("retrieval_confidence is None")
-            except NameError:
-                # retrieval_confidence doesn't exist or is None, calculate it
-                # Static route already calculated it above, so this should only happen for dynamic/hybrid
-                if route == "dynamic":
-                    retrieval_confidence, _ = await compute_retrieval_confidence(
-                        route=route,
-                        router_confidence=confidence,
-                        sql_result_count=qa_result.get('result_count', 0),
-                        sql_success=qa_result.get('success', False),
-                        query=analyzed_query,
-                        sql_query=qa_result.get('sql_query', []),
-                        qa_generator=qa_generator
-                    )
-                elif route == "hybrid":
-                    hybrid_static_available = len(static_chunks) > 0 if 'static_chunks' in locals() and static_chunks else False
-                    hybrid_dynamic_available = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
-                    retrieval_confidence, _ = await compute_retrieval_confidence(
-                        route=route,
-                        router_confidence=confidence,
-                        static_chunks=static_chunks if 'static_chunks' in locals() else None,
-                        sql_result_count=qa_result.get('result_count', 0),
-                        sql_success=qa_result.get('success', False),
-                        hybrid_static_available=hybrid_static_available,
-                        hybrid_dynamic_available=hybrid_dynamic_available
-                    )
-                log_step("retrieval_confidence_calculated", {
-                    "retrieval_confidence": retrieval_confidence,
-                    "route": route
-                })
-            else:
-                # retrieval_confidence was already calculated in route block, use it
-                log_step("using_existing_retrieval_confidence", {
-                    "retrieval_confidence": retrieval_confidence,
-                    "route": route
-                })
-            
-            qa_result['retrievalConfidence'] = retrieval_confidence
-            
-            # Ensure retrieval_confidence is not None before comparison
-            if retrieval_confidence is None:
-                log_step("retrieval_confidence_none", {
-                    "route": route,
-                    "note": "Setting retrieval_confidence to 0.0 as fallback"
-                }, "warning")
-                retrieval_confidence = 0.0
-                qa_result['retrievalConfidence'] = 0.0
-            
-            # Ambiguity is already checked early in the route-specific blocks
-            # At this point, if we reach here, the query is not ambiguous
-            # Just proceed with the answer (confidence is only for logging/metrics)
         
         qa_result['route'] = route
         qa_result['route_confidence'] = confidence
