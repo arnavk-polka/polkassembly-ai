@@ -67,7 +67,14 @@ DECISION RULES (follow these in order):
      or a filtered list (by topic, date, track, etc.), then it is NOT ambiguous.
    → In this case, answer "false".
 
-2) IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
+2) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE?
+   - Phrases like "how to", "how do I", "what is", "explain", "guide", "steps",
+     "process", "help me understand" point to documentation/static info.
+   - These are NOT ambiguous unless the user simultaneously refers to
+     one specific on-chain item without providing its ID.
+   → In this case, answer "false".
+
+3) IF NOT A HOW-TO, IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
    - Look for language like:
      - "this", "that", "the" + singular noun WITHOUT a topic/filter ("the referendum", "that bounty",
        "this treasury proposal") - these refer to a specific item without identifier
@@ -80,7 +87,7 @@ DECISION RULES (follow these in order):
    - If the query is NOT clearly about one specific item, it is NOT ambiguous.
    → In this case, answer "false".
 
-3) IF IT IS ABOUT A SPECIFIC ITEM, DOES IT INCLUDE A CLEAR IDENTIFIER?
+4) IF IT IS ABOUT A SPECIFIC ITEM, DOES IT INCLUDE A CLEAR IDENTIFIER?
 
    Acceptable identifiers include ANY of:
 
@@ -92,7 +99,7 @@ DECISION RULES (follow these in order):
    If any of these are present, then the query is NOT ambiguous.
    → In this case, answer "false".
 
-4) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
+5) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
 
    - The user is clearly asking about ONE specific item (Step 2 = yes)
    - AND they use vague references like "this", "that", "the" WITHOUT a topic/filter keyword
@@ -138,6 +145,9 @@ Should be "false" (not ambiguous):
 - "tell me about the polkabot.ai referenda" (has topic "polkabot.ai", so it's a listing query)
 - "show me the staking proposals" (has topic "staking", so it's a listing query)
 - "how many unique voters were there in November 2025"
+- "how to vote"
+- "how do I delegate my votes"
+- "explain conviction voting"
 Now, after applying the rules above, respond with ONLY:
 true
 or

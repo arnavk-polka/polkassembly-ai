@@ -21,6 +21,11 @@ def timeout_context(seconds):
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
 
+class GeminiClientError(RuntimeError):
+    """Custom exception for Gemini client failures."""
+    pass
+
+
 class GeminiClient:
     """A client class for interacting with Google's Gemini 2.5 Flash model."""
     
@@ -92,8 +97,8 @@ class GeminiClient:
         except TimeoutError as e:
             error_msg = f"Request timed out after {request_timeout} seconds. Try increasing timeout or check your internet connection."
             print(f"⏰ {error_msg}")
-            return error_msg
-            
+            raise TimeoutError(error_msg) from e
+        
         except Exception as e:
             error_msg = f"Error generating response: {str(e)}"
             print(f"❌ {error_msg}")
@@ -106,7 +111,7 @@ class GeminiClient:
             elif "network" in str(e).lower() or "connection" in str(e).lower():
                 error_msg += "\n💡 Check your internet connection and try again."
             
-            return error_msg
+            raise GeminiClientError(error_msg) from e
 
     def chat(self, messages, timeout=None, **kwargs):
         """
@@ -120,31 +125,26 @@ class GeminiClient:
         Returns:
             str: The generated response text
         """
-        try:
-            # Convert messages to the format expected by Gemini
-            contents = []
-            for msg in messages:
-                contents.append(f"{msg.get('role', 'user')}: {msg.get('content', '')}")
-            
-            conversation = "\n".join(contents)
-            print(f"💬 Starting chat conversation with {len(messages)} messages")
-            
-            return self.get_response(conversation, timeout=timeout, **kwargs)
-            
-        except Exception as e:
-            return f"Error in chat: {str(e)}"
+        # Convert messages to the format expected by Gemini
+        contents = []
+        for msg in messages:
+            contents.append(f"{msg.get('role', 'user')}: {msg.get('content', '')}")
+        
+        conversation = "\n".join(contents)
+        print(f"💬 Starting chat conversation with {len(messages)} messages")
+        
+        return self.get_response(conversation, timeout=timeout, **kwargs)
 
     def test_connection(self):
         """Test the connection with a simple request"""
         print("🔍 Testing connection...")
         try:
             test_response = self.get_response("Hello", timeout=10)
-            if "error" not in test_response.lower():
+            if test_response:
                 print("✅ Connection test successful!")
                 return True
-            else:
-                print(f"❌ Connection test failed: {test_response}")
-                return False
+            print("❌ Connection test failed: empty response")
+            return False
         except Exception as e:
             print(f"❌ Connection test failed: {str(e)}")
             return False

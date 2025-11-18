@@ -996,8 +996,26 @@ Respond with ONLY valid JSON:
                     model_name = getattr(self.gemini_client, 'model_name', 'Gemini')
                     print_model_usage(f"{model_name}", "response generation (static data)")
                     logger.info("Using Gemini for response generation")
-                    answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
-                    logger.info("Gemini response received successfully")
+                    try:
+                        answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
+                        logger.info("Gemini response received successfully")
+                    except Exception as gemini_error:
+                        logger.warning(f"Gemini response failed: {gemini_error}. Falling back to OpenAI.")
+                        if self.client:
+                            print_model_usage(self.model, "response generation fallback after Gemini error")
+                            response = self.client.chat.completions.create(
+                                model=self.model,
+                                messages=[
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt}
+                                ],
+                                temperature=self.temperature,
+                                max_tokens=self.max_tokens
+                            )
+                            answer = response.choices[0].message.content
+                            logger.info("OpenAI fallback response received successfully after Gemini error")
+                        else:
+                            raise gemini_error
                     
                 else:
                     # Fallback to OpenAI if no service is enabled
