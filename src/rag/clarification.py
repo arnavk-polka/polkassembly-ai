@@ -84,7 +84,7 @@ The route for this query has not been determined yet. Focus on clarifying:
                     role_display = role if role else 'user'
                     context_parts.append(f"{role_display}: {content[:200]}")
         if context_parts:
-            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their query."
+            conversation_context = f"\n\nCONVERSATION HISTORY (for context):\n" + "\n".join(context_parts) + "\n\nIMPORTANT: Use this conversation history to understand what the user is referring to. If the conversation history mentions specific proposals, referenda, topics, or IDs (like 'vitro connect referenda' or 'Kusama Referendum 244'), the current query is likely referring to those. DO NOT ask for information that was already provided in the conversation history."
     
     # Use LLM to dynamically generate context-aware clarification
     clarification_prompt = f"""

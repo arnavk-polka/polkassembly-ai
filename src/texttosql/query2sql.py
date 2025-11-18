@@ -289,7 +289,7 @@ class Query2SQL:
             formatted_results.append(formatted_result)
         
         return formatted_results
-    
+
     @staticmethod
     def _format_number_for_prompt(value: Any) -> str:
         """Format numeric values for readability while keeping the exact figure."""
@@ -1321,6 +1321,34 @@ Return ONLY the JSON object, no other text."""
             sql_queries = self._generate_sql_queries_only(natural_query, conversation_history)
             
             # Step 1.5: Check SQL precision before execution
+            if sql_queries:
+                import sys
+                import os
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'rag'))
+                from confidence import getSQLPrecisionScore
+                
+                combined_sql = ' '.join(sql_queries)
+                sql_precision = getSQLPrecisionScore(combined_sql)
+                logger.info(f"SQL precision score: {sql_precision}")
+                
+                if sql_precision < 0.3:
+                    logger.warning(f"SQL precision too low ({sql_precision}), returning early for clarification")
+                    return {
+                        "original_query": natural_query,
+                        "sql_query": None,
+                        "sql_queries": sql_queries,
+                        "result_count": 0,
+                        "results": [],
+                        "columns": [],
+                        "natural_response": "",
+                        "success": False,
+                        "error": "sql_precision_too_low",
+                        "sql_precision": sql_precision,
+                        "requires_clarification": True,
+                        "validator_verdict": None,
+                        "validator_reason": None
+                    }
+            
             # Step 2: Execute SQL queries
             all_results = self.execute_sql_queries(sql_queries)
             
@@ -2932,6 +2960,33 @@ SQL Query:
             
             # Step 1: Generate SQL queries first (without executing)
             sql_queries = self._generate_sql_queries_only_voting(natural_query, conversation_history)
+            
+            # Step 1.5: Check SQL precision before execution
+            if sql_queries:
+                import sys
+                import os
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'rag'))
+                from confidence import getSQLPrecisionScore
+                
+                combined_sql = ' '.join(sql_queries)
+                sql_precision = getSQLPrecisionScore(combined_sql)
+                logger.info(f"SQL precision score: {sql_precision}")
+                
+                if sql_precision < 0.3:
+                    logger.warning(f"SQL precision too low ({sql_precision}), returning early for clarification")
+                    return {
+                        "original_query": natural_query,
+                        "sql_query": None,
+                        "sql_queries": sql_queries,
+                        "result_count": 0,
+                        "results": [],
+                        "columns": [],
+                        "natural_response": "",
+                        "success": False,
+                        "error": "sql_precision_too_low",
+                        "sql_precision": sql_precision,
+                        "requires_clarification": True
+                    }
             
             # Step 2: Execute SQL queries
             all_results = self.execute_sql_queries(sql_queries)

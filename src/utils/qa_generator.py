@@ -997,8 +997,8 @@ Respond with ONLY valid JSON:
                     print_model_usage(f"{model_name}", "response generation (static data)")
                     logger.info("Using Gemini for response generation")
                     try:
-                    answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
-                    logger.info("Gemini response received successfully")
+                        answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
+                        logger.info("Gemini response received successfully")
                     except Exception as gemini_error:
                         logger.warning(f"Gemini response failed: {gemini_error}. Falling back to OpenAI.")
                         if self.client:
