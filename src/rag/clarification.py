@@ -13,7 +13,8 @@ async def generate_clarification_question(
     route: Optional[str],
     router_confidence: float,
     qa_generator,
-    log_step
+    log_step,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Generate a clarifying question when retrieval confidence is low.
@@ -70,6 +71,21 @@ The route for this query has not been determined yet. Focus on clarifying:
 - The exact topic or scope they care about if they’re being vague
 """
     
+    # Build conversation context if available
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        recent_messages = conversation_history[-6:]  # Last 6 messages for context
+        context_parts = []
+        for msg in recent_messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '')
+                if content and len(content) > 5:
+                    role_display = role if role else 'user'
+                    context_parts.append(f"{role_display}: {content[:200]}")
+        if context_parts:
+            conversation_context = f"\n\nCONVERSATION HISTORY (for context):\n" + "\n".join(context_parts) + "\n\nIMPORTANT: Use this conversation history to understand what the user is referring to. If the conversation history mentions specific proposals, referenda, topics, or IDs (like 'vitro connect referenda' or 'Kusama Referendum 244'), the current query is likely referring to those. DO NOT ask for information that was already provided in the conversation history."
+    
     # Use LLM to dynamically generate context-aware clarification
     clarification_prompt = f"""
 You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
@@ -78,7 +94,7 @@ The user asked: "{query}"
 
 This query was routed to the "{normalized_route}" category. The query is ambiguous and needs clarification.
 
-{route_context}
+{route_context}{conversation_context}
 
 CRITICAL INSTRUCTIONS:
 - Analyze the query type FIRST:

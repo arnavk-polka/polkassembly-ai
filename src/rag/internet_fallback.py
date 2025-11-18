@@ -141,6 +141,7 @@ Important guidelines:
 - Keep the response concise and informative
 - If the query is not related to Polkadot/Kusama, still provide a helpful answer
 - Use the search results to inform your response
+- DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
 
 Search the internet and provide the best answer you can:
 """
@@ -205,6 +206,7 @@ Important guidelines:
 - Focus on Polkadot/Kusama/blockchain governance topics if relevant
 - Keep the response concise and informative
 - If you don't know the answer, politely explain that you don't have specific information
+- DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
 
 Provide the best answer you can:
 """
@@ -239,7 +241,8 @@ Provide the best answer you can:
         else:
             if hasattr(qa_generator, 'client'):
                 system_prompt = """You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly. 
-You help users with questions even when you don't have specific data in your system."""
+You help users with questions even when you don't have specific data in your system. 
+DO NOT start responses with greetings like "Hello" or "As Klara" - just provide the answer directly."""
                 
                 response = qa_generator.client.chat.completions.create(
                     model=qa_generator.model,

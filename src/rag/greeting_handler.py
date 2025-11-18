@@ -140,17 +140,34 @@ async def handle_generic_query_llm(
     
     log_step("generic_handler_non_greeting", {"note": "Using LLM for non-greeting generic query"})
     try:
+        # Build conversation context if available
+        conversation_context = ""
+        if conversation_history and len(conversation_history) > 0:
+            recent_messages = conversation_history[-10:]  # Last 10 messages for context
+            context_parts = []
+            for msg in recent_messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '')
+                    if content and len(content) > 5:
+                        role_display = role if role else 'user'
+                        context_parts.append(f"{role_display}: {content[:300]}")
+            if context_parts:
+                conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse this conversation history to understand what the user is referring to. If the user asks questions like 'what am i talking about?' or 'what were we discussing?', answer based on the conversation history above."
+        
         generic_prompt = f"""
 You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
 
-The user has sent this query: "{query}"
+The user has sent this query: "{query}"{conversation_context}
 
 Guidelines:
+- If it's a conversational query about the conversation (like "what am i talking about?", "what were we discussing?", "remind me"), answer based on the conversation history provided above
 - If it's a casual question (like "how are you", "what's up", etc.), respond naturally and conversationally like a friendly AI assistant
 - If it's a non-Polkadot question, answer it helpfully but briefly mention you specialize in Polkadot/Kusama if relevant
 - If they seem lost or need help, explain what you can do with Polkadot governance
 - Be natural, friendly, and conversational - don't always redirect to Polkadot unless it makes sense
 - Keep responses concise but personable
+- DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
 
 Respond naturally as Klara would in a conversation.
 """
@@ -202,7 +219,9 @@ Respond naturally as Klara would in a conversation.
             if hasattr(qa_generator, 'client'):
                 try:
                     system_prompt = """You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly. 
-You help users with Polkadot governance questions, but you can also handle greetings and general queries in a friendly, helpful manner."""
+You help users with Polkadot governance questions, but you can also handle greetings and general queries in a friendly, helpful manner.
+If the user asks about the conversation (like "what am i talking about?"), use the conversation history to answer.
+DO NOT start responses with greetings like "Hello" or "As Klara" - just provide the answer directly."""
                     
                     response = qa_generator.client.chat.completions.create(
                         model=qa_generator.model,

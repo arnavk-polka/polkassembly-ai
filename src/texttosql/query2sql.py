@@ -289,6 +289,29 @@ class Query2SQL:
             formatted_results.append(formatted_result)
         
         return formatted_results
+
+    @staticmethod
+    def _format_number_for_prompt(value: Any) -> str:
+        """Format numeric values for readability while keeping the exact figure."""
+        try:
+            if isinstance(value, bool):
+                return str(value)
+            if isinstance(value, (int, float)):
+                abs_val = abs(value)
+                if abs_val >= 1_000_000_000_000:
+                    return f"{value:,.0f} ({value/1_000_000_000_000:.2f}T)"
+                if abs_val >= 1_000_000_000:
+                    return f"{value:,.0f} ({value/1_000_000_000:.2f}B)"
+                if abs_val >= 1_000_000:
+                    return f"{value:,.0f} ({value/1_000_000:.2f}M)"
+                if 0 < abs_val < 0.001:
+                    return f"{value:.6f}"
+                if isinstance(value, float):
+                    return f"{value:,.4f}".rstrip('0').rstrip('.')
+                return f"{value:,}"
+        except Exception:
+            pass
+        return str(value)
     
     def add_proposal_links(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -899,6 +922,7 @@ class Query2SQL:
                 - Use 'amount_formatted' for numerical display
                 - Use 'amount_display' for user-friendly display with currency symbols
                 - The formatting is already applied based on assetId rules in Python
+            - For any numeric value above 1,000,000, also restate it in a human-friendly scale (millions/billions) so the reader can parse it at a glance.
             - CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
             
             PROPOSAL TYPE CONTEXT:
@@ -1028,7 +1052,8 @@ class Query2SQL:
                         if value is not None and str(value) != 'None' and str(value).strip():
                             # Just clean up the key name for readability but include ALL fields
                             formatted_key = key.replace('_', ' ').title()
-                            item_info.append(f"{formatted_key}: {value}")
+                            formatted_value = self._format_number_for_prompt(value)
+                            item_info.append(f"{formatted_key}: {formatted_value}")
                     
                     if item_info:
                         summary_items.append(f"#{i+1}: " + ", ".join(item_info))

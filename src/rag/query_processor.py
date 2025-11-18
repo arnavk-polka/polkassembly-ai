@@ -19,7 +19,7 @@ from .internet_fallback import generate_internet_search_response
 logger = logging.getLogger(__name__)
 
 
-async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Optional[List[str]] = None) -> bool:
+async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Optional[List[str]] = None, conversation_history: Optional[List[Dict[str, Any]]] = None) -> bool:
     """
     Determine if a query truly needs clarification using LLM.
     
@@ -32,6 +32,7 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
         query: The user query to check
         qa_generator: QA generator instance with LLM access
         sql_queries: Optional list of SQL queries to analyze
+        conversation_history: Optional conversation history for context
     
     Returns:
         True if query truly needs clarification (missing required parameter), False otherwise
@@ -45,6 +46,25 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
         sql_str = ' '.join(sql_queries) if isinstance(sql_queries, list) else str(sql_queries)
         sql_context = f"\n\nSQL Query Generated: {sql_str[:200]}"
     
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        recent_messages = conversation_history[-6:]  # Last 6 messages for context
+        context_parts = []
+        for msg in recent_messages:
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '') or msg.get('message', '')
+                if content and len(str(content).strip()) > 5:
+                    role_display = role if role else 'user'
+                    # Extract more context to capture track names, categories, etc.
+                    content_str = str(content)[:500]  # Increased from 200 to 500
+                    context_parts.append(f"{role_display}: {content_str}")
+        if context_parts:
+            conversation_context = f"\n\nCONVERSATION HISTORY (for context):\n" + "\n".join(context_parts) + "\n\nCRITICAL: Use this conversation history to understand what the user is referring to. If the conversation history mentions specific proposals, referenda, topics, tracks (like 'Medium Spender', 'BigSpender'), categories, or IDs, the current query is likely a follow-up referring to similar items and is NOT ambiguous. For example, if the conversation was about 'Medium Spender' and the user asks 'how about bigspender', this is a clear follow-up query about a similar topic (BigSpender track) and is NOT ambiguous."
+            logger.info(f"Ambiguity check - Including conversation history with {len(context_parts)} messages for query: '{query[:50]}'")
+        else:
+            logger.info(f"Ambiguity check - No conversation history available for query: '{query[:50]}'")
+    
     ambiguity_prompt = f"""You are a STRICT ambiguity checker for a Polkadot/Kusama governance assistant.
 
 Your ONLY job:
@@ -54,40 +74,55 @@ You must output ONLY one word: "true" or "false" (lowercase, no punctuation).
 
 User Query:
 
-"{query}"{sql_context}
+"{query}"{sql_context}{conversation_context}
 
 ---
 
 DECISION RULES (follow these in order):
 
-1) IS THIS A LIST / SEARCH / AGGREGATE QUESTION?
+1) IS THIS A CONVERSATIONAL QUERY REFERENCING THE CONVERSATION?
+   - Examples: "what am i talking about?", "what were we discussing?", "remind me", 
+     "what did you just say?", "what was that about?", "can you repeat that?"
+   - These queries are asking about the conversation history itself, NOT about a specific on-chain item.
+   - If conversation history is available, these queries are NOT ambiguous - they can be answered from context.
+   → In this case, answer "false".
+
+1b) IS THIS A FOLLOW-UP QUERY THAT REFERENCES THE CONVERSATION CONTEXT?
+   - Look for patterns like: "how about X", "what about X", "show me X", "tell me about X", 
+     "what about the X", "and X?", "X too", "also X", "X as well"
+   - If conversation history is available AND the query references a similar topic/category/track/type
+     that was discussed in the conversation, this is a CLEAR follow-up query and is NOT ambiguous.
+   - Example: Previous query was about "Medium Spender" track → Current query "how about bigspender" 
+     is clearly asking about the "BigSpender" track (similar topic) → NOT ambiguous
+
+2) IS THIS A LIST / SEARCH / AGGREGATE QUESTION?
    - Examples: "show me proposals", "list treasury proposals", "find bounties",
      "how many voters", "show active referenda", "show proposals about staking".
    - If the query can reasonably be answered by returning a list, a count,
      or a filtered list (by topic, date, track, etc.), then it is NOT ambiguous.
    → In this case, answer "false".
 
-2) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE?
+3) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE?
    - Phrases like "how to", "how do I", "what is", "explain", "guide", "steps",
      "process", "help me understand" point to documentation/static info.
    - These are NOT ambiguous unless the user simultaneously refers to
      one specific on-chain item without providing its ID.
    → In this case, answer "false".
 
-3) IF NOT A HOW-TO, IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
+4) IF NOT A HOW-TO, IS THE USER ASKING ABOUT A SPECIFIC SINGLE ITEM?
    - Look for language like:
      - "this", "that", "the" + singular noun WITHOUT a topic/filter ("the referendum", "that bounty",
        "this treasury proposal") - these refer to a specific item without identifier
      - CRITICAL: Topic/filter keywords + plural nouns ("referenda", "proposals") mean "show me the data for that topic"
        and should be treated as DATA retrieval (still not ambiguous, but clearly **dynamic**, not static docs).
-       * Example: "tell me about the polkabot.ai referenda" → needs on-chain data for that topic (dynamic route)
+       * Example: "tell me about the #topic# referenda" → needs on-chain data for that topic (dynamic route)
        * Example: "show me the staking proposals" → data listing (dynamic)
      - Pure topic/filter keywords without entity nouns can remain static.
 
    - If the query is NOT clearly about one specific item, it is NOT ambiguous.
    → In this case, answer "false".
 
-4) IF IT IS ABOUT A SPECIFIC ITEM, DOES IT INCLUDE A CLEAR IDENTIFIER?
+5) IF IT IS ABOUT A SPECIFIC ITEM, DOES IT INCLUDE A CLEAR IDENTIFIER?
 
    Acceptable identifiers include ANY of:
 
@@ -99,9 +134,9 @@ DECISION RULES (follow these in order):
    If any of these are present, then the query is NOT ambiguous.
    → In this case, answer "false".
 
-5) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
+6) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
 
-   - The user is clearly asking about ONE specific item (Step 2 = yes)
+   - The user is clearly asking about ONE specific item (Step 4 = yes)
    - AND they use vague references like "this", "that", "the" WITHOUT a topic/filter keyword
    - AND there is NO numeric ID, NO URL with ID, and NO clear unique identifier
    - AND there is NO topic/filter keyword (like "polkabot.ai", "staking", etc.)
@@ -133,6 +168,10 @@ Should be "true" (ambiguous):
 
 Should be "false" (not ambiguous):
 
+- "what am i talking about?" (conversational query - can be answered from conversation history)
+- "remind me" (conversational query - can be answered from conversation history)
+- "how about bigspender" (follow-up query when previous conversation was about Medium Spender - clear context)
+- "what about Kusama" (follow-up query when previous conversation was about Polkadot - clear context)
 - "show me proposals"
 - "list treasury proposals"
 - "show me referenda 123"
@@ -755,7 +794,7 @@ async def processUserQuery(
             log_step("ambiguity_check_pre_route_start", {
                 "query": analyzed_query[:100]
             })
-            is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
+            is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None, conversationHistory)
             log_step("ambiguity_check_pre_route_complete", {
                 "query": analyzed_query[:100],
                 "is_ambiguous": is_ambiguous_query
@@ -773,7 +812,8 @@ async def processUserQuery(
                     route=None,
                     router_confidence=0.0,
                     qa_generator=qa_generator,
-                    log_step=log_step
+                    log_step=log_step,
+                    conversation_history=conversationHistory
                 )
                 
                 clarification_result['route'] = 'ambiguous_pre_route'
@@ -925,7 +965,8 @@ async def processUserQuery(
                         route=route,
                         router_confidence=confidence,
                         qa_generator=qa_generator,
-                        log_step=log_step
+                        log_step=log_step,
+                        conversation_history=conversationHistory
                     )
                     
                     clarification_result['route'] = route
@@ -992,7 +1033,8 @@ async def processUserQuery(
                             route=route,
                             router_confidence=confidence,
                             qa_generator=qa_generator,
-                            log_step=log_step
+                            log_step=log_step,
+                            conversation_history=conversationHistory
                         )
                         
                         clarification_result['route'] = route
@@ -1123,7 +1165,8 @@ async def processUserQuery(
                         route=route,
                         router_confidence=confidence,
                         qa_generator=qa_generator,
-                        log_step=log_step
+                        log_step=log_step,
+                        conversation_history=conversationHistory
                     )
                     
                     clarification_result['route'] = route
@@ -1233,7 +1276,8 @@ async def processUserQuery(
                             route=route,
                             router_confidence=confidence,
                             qa_generator=qa_generator,
-                            log_step=log_step
+                            log_step=log_step,
+                            conversation_history=conversationHistory
                         )
                         
                         clarification_result['route'] = route
