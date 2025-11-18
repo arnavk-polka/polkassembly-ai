@@ -532,7 +532,7 @@ Query: "{query}"{conversation_context}
 Available Routes:
 1. "static" - For procedural, educational, or informational questions:
    - Questions about what you CAN or CANNOT do (e.g., "can I cancel", "is it possible to", "can I still")
-   - Questions about HOW to do something (e.g., "how to cancel", "how do I", "how can I")
+   - Questions about HOW to do something (e.g., "how to cancel", "how do i", "how can i", "how to")
    - Governance/OpenGov concepts and explanations
    - Ambassador Programme information
    - Parachains & AnV explanations
@@ -548,6 +548,7 @@ Available Routes:
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
+   - Questions mentioning numbers (e.g., "show me the 10 most recent proposals", "list the 5 biggest bounties", "Who had the highest voting power in referenda 1232")
    - Questions asking for specific proposal information (title, content, status, dates, network)
    - Proposal metadata (type, proposer, beneficiary, amounts, curator)
    - Questions about specific proposal IDs (e.g., "Who is the curator of 1671", "What is the status of proposal 123")
