@@ -7,6 +7,7 @@ import logging
 import json
 import re
 import math
+import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -548,7 +549,7 @@ Available Routes:
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
-   - Questions mentioning numbers (e.g., "show me the 10 most recent proposals", "list the 5 biggest bounties", "Who had the highest voting power in referenda 1232")
+   - Questions mentioning numbers (e.g., "Who had the highest voting power in referenda 1232", "What is the status of proposal 123", "Show me the 10 most recent proposals")
    - Questions asking for specific proposal information (title, content, status, dates, network)
    - Proposal metadata (type, proposer, beneficiary, amounts, curator)
    - Questions about specific proposal IDs (e.g., "Who is the curator of 1671", "What is the status of proposal 123")
@@ -582,8 +583,9 @@ Now respond for this query:
         
         if getattr(qa_generator, "client", None):
             try:
+                router_model = os.getenv("ROUTER_MODEL", "gpt-4")
                 response = qa_generator.client.chat.completions.create(
-                    model=qa_generator.model,
+                    model=router_model,
                     messages=[{"role": "user", "content": routing_prompt}],
                     temperature=0.0,
                     max_tokens=4,
@@ -606,7 +608,8 @@ Now respond for this query:
                 log_step("router_llm_complete", {
                     "route": route_text,
                     "probability": probability,
-                    "certainty": certainty
+                    "certainty": certainty,
+                    "model": router_model
                 })
                 if route_text and probability >= 0.60:
                     return {
@@ -736,6 +739,51 @@ async def processUserQuery(
                 log_step("query_analysis_error", {"error": str(e)}, "error")
                 # Keep the analyzed_query (combined or original) on error
                 pass
+        
+        # Run ambiguity check BEFORE routing so we can clarify immediately
+        if not is_clarification_followup:
+            log_step("ambiguity_check_pre_route_start", {
+                "query": analyzed_query[:100]
+            })
+            is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
+            log_step("ambiguity_check_pre_route_complete", {
+                "query": analyzed_query[:100],
+                "is_ambiguous": is_ambiguous_query
+            })
+            
+            if is_ambiguous_query:
+                log_step("ambiguous_query_detected_pre_route", {
+                    "query": analyzed_query,
+                    "user_query": userMessage,
+                    "note": "Query is ambiguous before routing - returning clarification immediately"
+                })
+                
+                clarification_result = await generate_clarification_question(
+                    query=userMessage,
+                    route=None,
+                    router_confidence=0.0,
+                    qa_generator=qa_generator,
+                    log_step=log_step
+                )
+                
+                clarification_result['route'] = 'ambiguous_pre_route'
+                clarification_result['route_confidence'] = 0.0
+                clarification_result['retrievalConfidence'] = 0.0
+                clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                clarification_result['original_query'] = userMessage
+                
+                log_step("pipeline_complete", {
+                    "route": "ambiguous_pre_route",
+                    "confidence": 0.0,
+                    "retrieval_confidence": 0.0,
+                    "processing_time_ms": clarification_result['processing_time_ms'],
+                    "requires_clarification": True,
+                    "success": True
+                })
+                
+                return clarification_result
+            else:
+                is_ambiguous_query = False
         
         # Use stored route if available (from clarification followup), otherwise route normally
         if stored_route and stored_route in ['static', 'dynamic', 'hybrid', 'generic']:
@@ -1005,58 +1053,10 @@ async def processUserQuery(
         elif route == "dynamic":
             log_step("dynamic_route_start", {})
             
-            # Check which table will be used - skip ambiguity check for voting_data
             selected_table = qa_generator._determine_table_from_query(analyzed_query)
-            is_voting_data = selected_table == "voting_data" if selected_table else False
-            
             log_step("table_selection_check", {
-                "selected_table": selected_table,
-                "skip_ambiguity_check": is_voting_data
+                "selected_table": selected_table
             })
-            
-            # Check ambiguity immediately after routing - before SQL generation
-            # If ambiguous, return clarification question immediately
-            # Use analyzed_query (enhanced/modified) instead of original userMessage
-            if not is_voting_data and not is_clarification_followup:
-                is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
-                
-                if is_ambiguous_query:
-                    log_step("ambiguous_query_detected_early", {
-                        "query": analyzed_query,
-                        "user_query": userMessage,
-                        "note": "Query is ambiguous - missing required parameter, returning clarification immediately"
-                    })
-                    
-                    clarification_result = await generate_clarification_question(
-                        query=userMessage,
-                        route=route,
-                        router_confidence=confidence,
-                        qa_generator=qa_generator,
-                        log_step=log_step
-                    )
-                    
-                    clarification_result['route'] = route
-                    clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = 0.0
-                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                    clarification_result['original_query'] = userMessage
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": 0.0,
-                        "processing_time_ms": clarification_result['processing_time_ms'],
-                        "requires_clarification": True,
-                        "success": True
-                    })
-                    
-                    return clarification_result
-            else:
-                if is_voting_data:
-                    log_step("ambiguity_check_skipped", {
-                        "reason": "voting_data table - network filtering not possible"
-                    })
-                is_ambiguous_query = False
             
             # Proceed with SQL generation and answer (query is not ambiguous)
             qa_result = await qa_generator.generate_answer(
@@ -1335,45 +1335,6 @@ async def processUserQuery(
             )
             
             hybrid_dynamic_available = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
-            
-            # Check ambiguity immediately for hybrid route (before processing further)
-            # Use analyzed_query (enhanced/modified) instead of original userMessage
-            if not is_clarification_followup:
-                is_ambiguous_query = await is_query_truly_ambiguous(analyzed_query, qa_generator, None)
-                
-                if is_ambiguous_query:
-                    log_step("ambiguous_query_detected_hybrid_early", {
-                        "query": analyzed_query,
-                        "user_query": userMessage,
-                        "note": "Hybrid query is ambiguous - missing required parameter, returning clarification immediately"
-                    })
-                    
-                    clarification_result = await generate_clarification_question(
-                        query=userMessage,
-                        route=route,
-                        router_confidence=confidence,
-                        qa_generator=qa_generator,
-                        log_step=log_step
-                    )
-                    
-                    clarification_result['route'] = route
-                    clarification_result['route_confidence'] = confidence
-                    clarification_result['retrievalConfidence'] = 0.0
-                    clarification_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
-                    clarification_result['original_query'] = userMessage
-                    
-                    log_step("pipeline_complete", {
-                        "route": route,
-                        "confidence": confidence,
-                        "retrieval_confidence": 0.0,
-                        "processing_time_ms": clarification_result['processing_time_ms'],
-                        "requires_clarification": True,
-                        "success": True
-                    })
-                    
-                    return clarification_result
-            else:
-                is_ambiguous_query = False
             
             retrieval_confidence, _ = await compute_retrieval_confidence(
                 route=route,

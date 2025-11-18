@@ -2525,6 +2525,25 @@ class VoteQuery2SQL:
         
         return trimmed_prompt
 
+    def _gemini_response_has_error(self, response_text: Optional[str]) -> bool:
+        """
+        Gemini client returns human-readable error strings instead of raising.
+        Detect those so we can trigger proper fallbacks.
+        """
+        if not response_text:
+            return True
+        normalized = response_text.strip().lower()
+        error_markers = [
+            "error generating response",
+            "request timed out",
+            "operation timed out",
+            "model is overloaded",
+            "503",
+            "service unavailable",
+            "unavailable"
+        ]
+        return any(marker in normalized for marker in error_markers)
+
     def _generate_sql_with_model(self, system_prompt: str, user_message: str = None) -> str:
         """Generate SQL using Gemini as primary and OpenAI as fallback for voting data"""
         try:
@@ -2540,6 +2559,8 @@ class VoteQuery2SQL:
                 
                 try:
                     response = self.gemini_client.get_response(full_prompt)
+                    if self._gemini_response_has_error(response):
+                        raise RuntimeError(response)
                     return response.strip()
                 except Exception as e:
                     # Check if it's a 503 error (model overloaded)
@@ -2551,6 +2572,8 @@ class VoteQuery2SQL:
                             print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (voting data)")
                             fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
                             response = fallback_client.get_response(full_prompt)
+                            if self._gemini_response_has_error(response):
+                                raise RuntimeError(response)
                             logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting SQL generation")
                             return response.strip()
                         except Exception as fallback_error:

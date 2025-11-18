@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def generate_clarification_question(
     query: str,
-    route: str,
+    route: Optional[str],
     router_confidence: float,
     qa_generator,
     log_step
@@ -30,13 +30,15 @@ async def generate_clarification_question(
     """
     log_step("clarification_start", {
         "query_preview": query[:100],
-        "route": route,
+        "route": route or "undetermined",
         "router_confidence": router_confidence
     })
     
     # Build context-aware clarification prompt based on route
     route_context = ""
-    if route == "dynamic":
+    normalized_route = (route or "undetermined").lower()
+    
+    if normalized_route == "dynamic":
         route_context = """
 This is a dynamic/on-chain data query. Common ambiguities include:
 - Network selection (Polkadot vs Kusama)
@@ -46,7 +48,7 @@ This is a dynamic/on-chain data query. Common ambiguities include:
 
 For queries about proposals, referenda, votes, or treasury data, the most common ambiguity is which network (Polkadot or Kusama).
 """
-    elif route == "static":
+    elif normalized_route == "static":
         route_context = """
 This is a static/educational query. Common ambiguities include:
 - Specific topic or concept within the broader subject
@@ -54,11 +56,18 @@ This is a static/educational query. Common ambiguities include:
 - Specific use case or scenario
 - Unclear terminology or acronyms
 """
-    elif route == "hybrid":
+    elif normalized_route == "hybrid":
         route_context = """
 This is a hybrid query needing both explanation and data. Common ambiguities include:
 - Network selection (Polkadot or Kusama) for the data portion
 - Scope of explanation vs data requested
+"""
+    else:
+        route_context = """
+The route for this query has not been determined yet. Focus on clarifying:
+- Whether the user is referring to a specific proposal/referendum/bounty or asking generally
+- Any missing identifiers (ID numbers, links, titles)
+- The exact topic or scope they care about if they’re being vague
 """
     
     # Use LLM to dynamically generate context-aware clarification
@@ -67,7 +76,7 @@ You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Pol
 
 The user asked: "{query}"
 
-This query was routed to the "{route}" category. The query is ambiguous and needs clarification.
+This query was routed to the "{normalized_route}" category. The query is ambiguous and needs clarification.
 
 {route_context}
 
@@ -128,7 +137,7 @@ You help clarify ambiguous user queries by asking one specific question. Always 
     except Exception as e:
         log_step("clarification_llm_error", {"error": str(e)}, "error")
         # Minimal fallback - still try to be specific
-        if route == "dynamic":
+        if normalized_route == "dynamic":
             clarification_question = "Are you looking for this information on Polkadot or Kusama network?"
         else:
             clarification_question = "Could you please provide more details about what you're looking for?"
