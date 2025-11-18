@@ -64,13 +64,20 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
         else:
             logger.info(f"Ambiguity check - No conversation history available for query: '{query[:50]}'")
     
-    ambiguity_prompt = f"""You are a STRICT ambiguity checker for a Polkadot/Kusama governance assistant.
+    ambiguity_prompt = f"""You are an ambiguity checker for a Polkadot/Kusama governance assistant.
 
 Your ONLY job:
 
 Decide if the user's query is missing a REQUIRED identifier for a **single, specific on-chain item** (referendum, proposal, bounty, treasury item, etc.).
 
-CRITICAL: Procedural questions ("how to", "how do I", "can I", etc.) are NEVER ambiguous - they ask about processes, not specific items.
+GENERAL PRINCIPLE: Default to "false" (NOT ambiguous) unless the query is truly impossible to answer without more information. 
+If the query can be reasonably answered (even if not perfectly specific), it is NOT ambiguous.
+
+CRITICAL RULES:
+- Procedural questions ("how to", "how do I", "can I", etc.) are NEVER ambiguous - they ask about processes, not specific items.
+- Track-related queries asking for properties, limits, or metrics ("what is the max spend of X track") are NEVER ambiguous - they are data requests, not requests for a specific item identifier.
+- Data requests, list queries, aggregate queries, and "what is" questions are RARELY ambiguous - they can usually be answered.
+- Only mark as ambiguous if the query uses vague references ("this", "that", "the") WITHOUT any context, topic, or identifier AND it's asking about a specific single item.
 
 You must output ONLY one word: "true" or "false" (lowercase, no punctuation).
 
@@ -95,18 +102,26 @@ DECISION RULES (follow these in order):
    - Example: Previous query was about "Medium Spender" track → Current query "how about bigspender" 
      is clearly asking about the "BigSpender" track (similar topic) → NOT ambiguous
 
-2) IS THIS A LIST / SEARCH / AGGREGATE QUESTION?
+2) IS THIS A LIST / SEARCH / AGGREGATE / DATA QUESTION?
    - Examples: "show me proposals", "list treasury proposals", "find bounties",
      "how many voters", "show active referenda", "show proposals about staking".
    - If the query can reasonably be answered by returning a list, a count,
      or a filtered list (by topic, date, track, etc.), then it is NOT ambiguous.
+   - Queries asking for track properties, limits, or metrics are NOT ambiguous:
+     * "what is the max spend of bigspender track" = asking for track data/limits → NOT ambiguous
    → In this case, answer "false".
 
-3) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE?
+3) IS THE USER ASKING FOR AN EXPLANATION / HOW-TO / GENERAL GUIDANCE / DATA?
    - Phrases like "how to", "how do I", "how can I", "can I", "what is", "explain", "guide", "steps",
-     "process", "help me understand" point to documentation/static info.
+     "process", "help me understand" point to documentation/static info OR data requests.
    - CRITICAL: If the query contains "how to", "how do I", "how can I", "can I", it is asking about a PROCESS or PROCEDURE.
-   - These are ALWAYS NOT ambiguous - they are asking about HOW to do something, not asking for details about a specific item.
+     These are ALWAYS NOT ambiguous - they are asking about HOW to do something, not asking for details about a specific item.
+   - CRITICAL: "What is" and "what are" questions are GENERALLY NOT ambiguous:
+     * They can be answered with explanations (static route) or data (dynamic route)
+     * "what is the max spend of bigspender track" = asking for track data/limits → NOT ambiguous
+     * "what is OpenGov" = asking for explanation → NOT ambiguous
+     * "what is a delegate" = asking for explanation → NOT ambiguous
+     * Only mark as ambiguous if it's clearly asking about a specific item without identifier (e.g., "what is this proposal")
    - Even if the query mentions "my ref", "my proposal", "the referendum", etc., if it's asking "how to" do something,
      it's a procedural question and is NOT ambiguous.
    - Examples: "how to cancel my ref" = asking about cancellation process, NOT asking for ref details
@@ -142,18 +157,32 @@ DECISION RULES (follow these in order):
 6) ONLY IF ALL OF THE FOLLOWING ARE TRUE, IT IS AMBIGUOUS:
 
    - The query is NOT a procedural question (NOT "how to", "how do I", "can I", etc.) - if it is procedural, it's NOT ambiguous
+   - AND the query is NOT a data request, list query, aggregate query, or "what is" question
    - AND the user is clearly asking about ONE specific item (Step 4 = yes)
    - AND they use vague references like "this", "that", "the" WITHOUT a topic/filter keyword
    - AND there is NO numeric ID, NO URL with ID, and NO clear unique identifier
-   - AND there is NO topic/filter keyword (like "polkabot.ai", "staking", etc.)
+   - AND there is NO topic/filter keyword (like "polkabot.ai", "staking", "bigspender track", etc.)
+   - AND there is NO conversation history that provides context
    - AND we cannot reasonably treat it as a list/search query instead
-   → ONLY in this case answer "true".
+   - AND the query is truly impossible to answer without more information
+   → ONLY if ALL of these are true, answer "true". Otherwise, default to "false".
 
 IMPORTANT CONSTRAINTS:
+
+- DEFAULT TO "false" (NOT ambiguous) unless the query is truly impossible to answer.
+  If there's any reasonable way to answer the query, it is NOT ambiguous.
 
 - Procedural questions ("how to", "how do I", "how can I", "can I", etc.) are NEVER ambiguous.
   They ask about processes/procedures, not specific items. Even if they mention "my ref" or "the proposal",
   they are asking HOW to do something, not asking for details about a specific item.
+
+- Track-related queries asking for properties, limits, or metrics are NEVER ambiguous:
+  * "what is the max spend of X track" = asking for track data → NOT ambiguous
+  * "what are the limits of X track" = asking for track properties → NOT ambiguous
+  * These are data requests, not requests for a specific on-chain item identifier.
+
+- Data requests, list queries, aggregate queries, and "what is" questions are RARELY ambiguous.
+  They can usually be answered even if not perfectly specific.
 
 - The network (Polkadot vs Kusama) is ALWAYS OPTIONAL.
   Missing network MUST NEVER make the query ambiguous.
@@ -161,8 +190,13 @@ IMPORTANT CONSTRAINTS:
 - Listing / searching / counting queries are NEVER ambiguous,
   even if they could be more specific.
 
-- Queries with filters or topics ("about polkabot.ai", "about staking", "in October")
-  are NOT ambiguous if they can be answered by a list or count.
+- Queries with filters or topics ("about polkabot.ai or any other referenda", "about staking", "in October", track names, etc.)
+  are NOT ambiguous if they can be answered by a list, count, or data retrieval.
+
+- "What is" questions are generally NOT ambiguous - they can be answered with explanations or data.
+
+- Only mark as ambiguous if the query is truly vague and impossible to answer without clarification.
+  When in doubt, choose "false" (NOT ambiguous).
 
 - Do NOT try to be helpful or suggest follow-up questions.
   Just decide: is a REQUIRED identifier missing for a single specific item?
@@ -197,6 +231,15 @@ Should be "false" (not ambiguous):
 - "I placed decision deposit already, how to cancel my ref to get it back" (procedural question - asking HOW to cancel, NOT asking for ref details)
 - "how to cancel my ref" (procedural question - asking about cancellation process)
 - "can I cancel my proposal" (procedural question - asking about possibility/process)
+- "what is the max spend of bigspender track" (asking for track data/limits - NOT ambiguous, should route to dynamic)
+- "what is the max spend of medium spender track" (asking for track data - NOT ambiguous)
+- "what are the limits of X track" (asking for track properties - NOT ambiguous)
+- "what is OpenGov" (asking for explanation - NOT ambiguous)
+- "what is a delegate" (asking for explanation - NOT ambiguous)
+- "what is the status of proposals" (asking for data - NOT ambiguous, can list all proposals)
+- "show me recent referenda" (list query - NOT ambiguous)
+- "find proposals about X topic" (search query - NOT ambiguous)
+- "what are the voting rules" (asking for information - NOT ambiguous)
 Now, after applying the rules above, respond with ONLY:
 true
 or
