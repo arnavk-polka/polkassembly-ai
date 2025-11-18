@@ -47,7 +47,15 @@ column_list = ['source_file', 'source_network', 'source_proposal_type',
        'title', 'topic', 'updatedat', 'userid', 'onchaininfo_beneficiaries_0_assetid', 'row_index']
 
 governance_data_486 = pd.read_csv(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/one_table/combined_governance_data.csv")
-governance_data_86 = governance_data_486[column_list]
+
+# Some monthly exports drop certain columns; keep only those that actually exist.
+available_columns = [col for col in column_list if col in governance_data_486.columns]
+missing_columns = sorted(set(column_list) - set(available_columns))
+
+if missing_columns:
+    print(f"⚠️  Skipping {len(missing_columns)} missing columns: {missing_columns[:10]}{'...' if len(missing_columns) > 10 else ''}")
+
+governance_data_86 = governance_data_486[available_columns]
 
 """
 Some of the columns are not present in the governance_data_86 dataframe

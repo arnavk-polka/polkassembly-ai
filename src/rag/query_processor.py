@@ -78,11 +78,11 @@ DECISION RULES (follow these in order):
    - Look for language like:
      - "this", "that", "the" + singular noun WITHOUT a topic/filter ("the referendum", "that bounty",
        "this treasury proposal") - these refer to a specific item without identifier
-     - CRITICAL: If "the" is followed by a TOPIC/FILTER keyword, it's a LISTING query, NOT a specific item:
-       * "tell me about the polkabot.ai referenda" → LISTING (has topic "polkabot.ai")
-       * "show me the staking proposals" → LISTING (has topic "staking")
-     - If the query has a topic/filter keyword (like "polkabot.ai", "staking", "treasury", etc.),
-       it's a LISTING query and is NOT ambiguous
+     - CRITICAL: Topic/filter keywords + plural nouns ("referenda", "proposals") mean "show me the data for that topic"
+       and should be treated as DATA retrieval (still not ambiguous, but clearly **dynamic**, not static docs).
+       * Example: "tell me about the polkabot.ai referenda" → needs on-chain data for that topic (dynamic route)
+       * Example: "show me the staking proposals" → data listing (dynamic)
+     - Pure topic/filter keywords without entity nouns can remain static.
 
    - If the query is NOT clearly about one specific item, it is NOT ambiguous.
    → In this case, answer "false".
@@ -142,7 +142,7 @@ Should be "false" (not ambiguous):
 - "how many voters"
 - "show me proposals on Polkadot"
 - "show proposals about staking"
-- "tell me about the polkabot.ai referenda" (has topic "polkabot.ai", so it's a listing query)
+- "tell me about the polkabot.ai referenda" (topic + referenda implies on-chain data filter → route dynamic)
 - "show me the staking proposals" (has topic "staking", so it's a listing query)
 - "how many unique voters were there in November 2025"
 - "how to vote"
@@ -488,7 +488,7 @@ def get_router_confidence_from_logprobs(choice) -> float:
 
 
 def fallback_route_inference(query_lower: str) -> str:
-    dynamic_keywords = ['proposal', 'referendum', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
+    dynamic_keywords = ['proposal', 'referendum', 'referenda', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
     static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition']
     is_person_query = query_lower.startswith('who is ') and len(query_lower.split()) <= 4
     governance_who_is = any(term in query_lower for term in ['delegate', 'curator', 'proposer', 'beneficiary', 'ambassador'])
@@ -819,6 +819,19 @@ async def processUserQuery(
             )
             route = route_result["route"]
             confidence = route_result["confidence"]
+
+            # Heuristic override: if LLM chose static but the query clearly looks like a data request,
+            # force the inferred dynamic route so referenda/proposal queries don't get stuck in docs.
+            if route == "static":
+                inferred_route = fallback_route_inference(analyzed_query.lower())
+                if inferred_route in ["dynamic", "hybrid"]:
+                    log_step("router_override_applied", {
+                        "original_route": route,
+                        "inferred_route": inferred_route,
+                        "confidence_before": confidence
+                    })
+                    route = inferred_route
+                    confidence = min(confidence, 0.65)  # downgrade confidence when overriding
         log_step("routing_complete", {
             "route": route,
             "confidence": confidence,
