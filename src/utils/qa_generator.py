@@ -391,7 +391,7 @@ class QAGenerator:
                 })
             
             # Improved prompt with better structure and examples
-            analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries.
+            analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
 
 CONVERSATION HISTORY:
 {self._format_conversation_history(serializable_history)}
@@ -402,13 +402,16 @@ IMPORTANT:
 - The CURRENT USER QUERY above is the actual query you should analyze
 - Do NOT use clarification questions from the conversation history as the query
 - Only use the conversation history to understand context for incomplete queries (e.g., "what about June?")
+- If the current user query already explicitly specifies the topic (e.g., mentions "Polkadot", "OpenGov", "treasury", etc.), you MUST leave it exactly as-is.
+- You are NOT allowed to invent new context like specific networks or frameworks unless the user explicitly mentioned them earlier in the conversation.
 
 INSTRUCTIONS:
-1. If the current query is complete and standalone → return it unchanged
+1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
 2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
 3. Preserve the user's intent and style
 4. Keep technical terms and column names consistent with previous queries
 5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
+6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
 
 EXAMPLES:
 

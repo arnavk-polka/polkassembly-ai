@@ -1031,7 +1031,8 @@ async def processUserQuery(
                     internet_result = await generate_internet_search_response(
                         query=analyzed_query,
                         qa_generator=qa_generator,
-                        log_step=log_step
+                        log_step=log_step,
+                        route=route
                     )
                     
                     internet_result['route'] = route
@@ -1140,7 +1141,8 @@ async def processUserQuery(
                 internet_result = await generate_internet_search_response(
                     query=analyzed_query,
                     qa_generator=qa_generator,
-                    log_step=log_step
+                    log_step=log_step,
+                    route=route
                 )
                 
                 internet_result['route'] = route
@@ -1245,7 +1247,8 @@ async def processUserQuery(
                     internet_result = await generate_internet_search_response(
                         query=analyzed_query,
                         qa_generator=qa_generator,
-                        log_step=log_step
+                        log_step=log_step,
+                        route=route
                     )
                     
                     internet_result['route'] = route
@@ -1264,14 +1267,14 @@ async def processUserQuery(
                         "validator_verdict": validator_verdict,
                         "success": True
                     })
-                    
+                
                     return internet_result
                 else:
                     decision = "ANSWER"
                     log_step("dynamic_fallback_answer", {
                         "validator_verdict": validator_verdict,
                         "validator_reason": validator_reason,
-                        "result_count": result_count,
+                "result_count": result_count,
                         "requires_clarification": requires_clarification,
                         "requires_fallback": requires_fallback,
                         "decision": decision,
