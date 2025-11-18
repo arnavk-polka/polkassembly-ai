@@ -80,7 +80,7 @@ async def _build_contextual_search_query(query: str, route: Optional[str], qa_ge
                     content_str = str(content)[:300]  # Limit to 300 chars per message
                     context_parts.append(f"{role_display}: {content_str}")
         if context_parts:
-            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nIMPORTANT: Use the conversation history to understand what the user is really asking about. If the conversation mentions specific topics, proposals, referenda, tracks, or networks, include those in the search query. For example, if the conversation was about 'vitro connect referenda' and the current query is 'Yes it is a kusama referenda', the search should include 'vitro connect' and 'kusama'."
+            conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is really asking about."
     
     system_prompt = (
         "You rewrite user queries into precise web-search strings focused on Polkadot/Kusama governance. "
