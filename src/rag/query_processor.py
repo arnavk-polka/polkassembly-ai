@@ -554,7 +554,7 @@ def get_router_confidence_from_logprobs(choice) -> float:
 
 def fallback_route_inference(query_lower: str) -> str:
     dynamic_keywords = ['proposal', 'referendum', 'referenda', 'bounty', 'treasury', 'voter', 'vote', 'show me', 'list', 'find', 'get', 'count', 'how many', 'specific', 'address']
-    static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition']
+    static_keywords = ['how to', 'how can i', 'what is', 'how does', 'explain', 'tutorial', 'guide', 'delegate', 'delegation', 'concept', 'definition', 'identity', 'verified', 'judgement', 'seems like', 'i have no', 'why don\'t i', 'why can\'t i', 'it seems', 'i don\'t see']
     is_person_query = query_lower.startswith('who is ') and len(query_lower.split()) <= 4
     governance_who_is = any(term in query_lower for term in ['delegate', 'curator', 'proposer', 'beneficiary', 'ambassador'])
     if any(keyword in query_lower for keyword in dynamic_keywords):
@@ -621,6 +621,9 @@ Available Routes:
    - Questions about processes, rules, or procedures
    - Questions about delegates, delegation concepts, or how delegation works
    - Track definitions or theoretical limits without asking for actual on-chain numbers (e.g., "What is the Medium Spender track?")
+   - Questions about account status, identity verification, or user features (e.g., "my identity is verified but", "why don't I have", "I don't see", "it seems like I have no")
+   - Troubleshooting questions about why features aren't working or why something doesn't appear
+   - Questions about judgement, voting power, or other Polkassembly account features and their status
 
 2. "dynamic" - For queries requesting specific on-chain DATA:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
