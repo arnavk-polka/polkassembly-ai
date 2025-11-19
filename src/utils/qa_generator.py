@@ -1148,7 +1148,11 @@ Respond with ONLY valid JSON:
 
 If conversation history is provided, consider it when answering. If the current question is a follow-up to previous queries, provide relevant context from previous responses. If the current question is standalone, answer independently.
 
-You will be provided with context from Polkadot documentation and forum posts. Please follow these guidelines:
+You will be provided with context from Polkadot documentation and forum posts. 
+
+CRITICAL: Only answer the specific question asked by the user. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question. Do NOT include information about related but different topics unless the user explicitly asks for them. If the context contains information about multiple topics, only use the chunks that are directly relevant to the user's specific question.
+
+Please follow these guidelines:
 
                 ✅ PROFESSIONAL FORMATTING REQUIREMENTS:
                 - ALWAYS add line breaks between numbered steps
@@ -1222,7 +1226,7 @@ You will be provided with context from Polkadot documentation and forum posts. P
         
         prompt_parts.append(f"Current Question: {query}")
         
-        prompt_parts.append("Answer the question directly without mentioning the context, sources, documentation, or previous conversations. Do not start with phrases like \"Based on the provided context\", \"According to the documentation\", \"From the Polkadot Wiki\", \"From our previous conversation\", etc. Simply provide the answer as if you have direct knowledge of the topic.\n\nCRITICAL FORMATTING REQUIREMENTS:\n- NEVER start with headers (##, ###)\n- Start directly with answer content\n- ALWAYS add line breaks between numbered steps (1. step one [LINE BREAK] 2. step two [LINE BREAK])\n- ALWAYS add line breaks between bullet points\n- Use professional markdown formatting throughout\n- IMPORTANT: Include all images from the context using exact markdown format: ![Step Image](url)")
+        prompt_parts.append("CRITICAL INSTRUCTIONS:\n- Answer ONLY the specific question asked. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question.\n- Do NOT include information about related but different topics unless explicitly asked.\n- If the context contains multiple topics, only use the chunks that are directly relevant to the specific question asked.\n- Answer the question directly without mentioning the context, sources, documentation, or previous conversations. Do not start with phrases like \"Based on the provided context\", \"According to the documentation\", \"From the Polkadot Wiki\", \"From our previous conversation\", etc. Simply provide the answer as if you have direct knowledge of the topic.\n\nCRITICAL FORMATTING REQUIREMENTS:\n- NEVER start with headers (##, ###)\n- Start directly with answer content\n- ALWAYS add line breaks between numbered steps (1. step one [LINE BREAK] 2. step two [LINE BREAK])\n- ALWAYS add line breaks between bullet points\n- Use professional markdown formatting throughout\n- IMPORTANT: Include all images from the context using exact markdown format: ![Step Image](url)")
         
         return "\n\n".join(prompt_parts)
     
