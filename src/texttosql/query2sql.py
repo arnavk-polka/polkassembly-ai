@@ -336,9 +336,14 @@ class Query2SQL:
             proposal_type = None
             title = None
             
-            # Extract proposal ID (try multiple possible field names)
+            # Extract proposal ID - ONLY use index fields, never Firebase IDs
+            # Priority: index > proposal_index (explicitly exclude 'id' and 'proposal_id' to avoid Firebase IDs)
             for key in result.keys():
-                if key.lower() in ['index', 'proposal_index', 'id', 'proposal_id']:
+                key_lower = key.lower()
+                # Skip Firebase IDs and other non-index identifiers
+                if key_lower in ['objectid', 'object_id', 'firebase_id', '_id']:
+                    continue
+                if key_lower in ['index', 'proposal_index']:
                     proposal_id = result.get(key)
                     break
             
@@ -378,8 +383,18 @@ class Query2SQL:
             # Generate link if we have the required information
             if proposal_id is not None and network and proposal_type:
                 try:
-                    # Clean and validate proposal_id
-                    proposal_id_clean = str(proposal_id).strip()
+                    # Clean and validate proposal_id - convert to int if numeric to avoid float formatting
+                    if isinstance(proposal_id, (int, float)):
+                        # Convert to int if it's a whole number (e.g., 1793.0 -> 1793)
+                        if isinstance(proposal_id, float) and proposal_id.is_integer():
+                            proposal_id_clean = str(int(proposal_id))
+                        elif isinstance(proposal_id, float):
+                            proposal_id_clean = str(int(proposal_id))
+                        else:
+                            proposal_id_clean = str(proposal_id)
+                    else:
+                        proposal_id_clean = str(proposal_id).strip()
+                    
                     if proposal_id_clean and proposal_id_clean != 'None' and proposal_id_clean != 'NaN':
                         
                         # Generate link based on type and network
@@ -858,8 +873,12 @@ class Query2SQL:
                     # Add structured info
                     for j, result in enumerate(trimmed_results):
                         item_info = []
-                        # Include ALL fields from SQL results - no filtering whatsoever
+                        # Include ALL fields from SQL results, but exclude Firebase IDs
                         for key, value in result.items():
+                            # Skip Firebase IDs and internal identifiers
+                            key_lower = key.lower()
+                            if key_lower in ['objectid', 'object_id', 'firebase_id', '_id']:
+                                continue
                             if value is not None and str(value) != 'None' and str(value).strip():
                                 # Just clean up the key name for readability but include ALL fields
                                 formatted_key = key.replace('_', ' ').title()
@@ -911,7 +930,8 @@ class Query2SQL:
             3. COMBINED QUERIES: Present count first, then show examples in a logical flow
             
             DATA PRESENTATION:
-            - Show actual proposal IDs, titles, addresses, amounts - all public blockchain data
+            - Show actual proposal IDs (use 'index' field), titles, addresses, amounts - all public blockchain data
+            - NEVER mention or use Firebase IDs (objectID, object_id, _id) - these are internal identifiers and should be ignored
             - Include status, creation dates, and network information when available
             - For proposals with amounts, show the actual values requested
             - Use conversational language about Polkadot/Kusama governance
@@ -936,6 +956,7 @@ class Query2SQL:
                 - Use 'proposal_link' field for the URL
                 - Use 'proposal_link_display' field for markdown formatted link with title
                 - Links are automatically generated based on proposal type and network
+                - CRITICAL: NEVER use Firebase IDs (objectID, object_id, _id) for links - only use the 'index' field. The proposal_link field is already correctly generated using the index.
                
             
             IMPORTANT: All data is public blockchain information. Show actual values, addresses, and details.
@@ -1047,8 +1068,12 @@ class Query2SQL:
                 for i, result in enumerate(trimmed_results[:10]):  # Show up to 10 examples
                     item_info = []
                     
-                    # Include ALL fields from SQL results - no filtering whatsoever
+                    # Include ALL fields from SQL results, but exclude Firebase IDs
                     for key, value in result.items():
+                        # Skip Firebase IDs and internal identifiers
+                        key_lower = key.lower()
+                        if key_lower in ['objectid', 'object_id', 'firebase_id', '_id']:
+                            continue
                         if value is not None and str(value) != 'None' and str(value).strip():
                             # Just clean up the key name for readability but include ALL fields
                             formatted_key = key.replace('_', ' ').title()
@@ -1101,12 +1126,14 @@ class Query2SQL:
                 - Use 'proposal_link' field for the URL
                 - Use 'proposal_link_display' field for markdown formatted link with title
                 - Links are automatically generated based on proposal type and network
+                - CRITICAL: NEVER use Firebase IDs (objectID, object_id, _id) for links - only use the 'index' field. The proposal_link field is already correctly generated using the index.
                
             
             DATA PRESENTATION:
             - Use conversational language about Polkadot/Kusama governance
             - Be specific and factual with all data provided
-            - Show actual proposal IDs, titles, addresses, amounts - all public blockchain information
+            - Show actual proposal IDs (use 'index' field), titles, addresses, amounts - all public blockchain information
+            - NEVER mention or use Firebase IDs (objectID, object_id, _id) - these are internal identifiers and should be ignored
             - Include network (Polkadot/Kusama), status, and creation dates when available
             - Never refuse to show data citing privacy or future date concerns - all blockchain data is public and historical
             - ALWAYS answer based on the actual results provided, even if dates seem unusual
