@@ -236,11 +236,23 @@ class PolkassemblyDataFetcher:
 
         return all_comments[:max_items]
 
+def _resolve_data_dir(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    env_dir = os.getenv("ONCHAIN_DATA_DIR")
+    if env_dir:
+        return env_dir
+    base_path = os.getenv("BASE_PATH")
+    if base_path:
+        return os.path.join(base_path, "data", "onchain_data")
+    script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(script_dir, "data", "onchain_data")
+
+
 def fetch_comments_data(network: str = "polkadot", data_dir: str = None, max_items: int = 1000):
     """Main function to fetch comments data for a specific network"""
     # Use the specified directory path
-    if not data_dir:
-        data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
+    data_dir = _resolve_data_dir(data_dir)
     
     logger.info(f"Storing comments data in: {data_dir}")
     
@@ -268,8 +280,7 @@ def fetch_comments_data(network: str = "polkadot", data_dir: str = None, max_ite
 def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
     """Main function to fetch onchain data for all supported networks"""
     # Use the specified directory path
-    if not data_dir:
-        data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
+    data_dir = _resolve_data_dir(data_dir)
     
     logger.info(f"Storing onchain data in: {data_dir}")
     

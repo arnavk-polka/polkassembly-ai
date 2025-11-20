@@ -568,6 +568,87 @@ def fallback_route_inference(query_lower: str) -> str:
     return "static"
 
 
+def _format_conversation_history_for_validation(conversation_history: Optional[List[Dict[str, Any]]]) -> str:
+    """Convert conversation history into a compact string for validator prompts."""
+    if not conversation_history:
+        return ""
+    
+    formatted_messages = []
+    recent_history = conversation_history[-10:]  # limit for brevity
+    for msg in recent_history:
+        if isinstance(msg, dict):
+            role = msg.get('role', 'user')
+            content = msg.get('content') or msg.get('response') or msg.get('query') or msg.get('answer')
+        else:
+            role = getattr(msg, 'role', 'user')
+            content = getattr(msg, 'content', None) or getattr(msg, 'response', None) or getattr(msg, 'query', None)
+        if content:
+            formatted_messages.append(f"{role.upper()}: {str(content).strip()}")
+    
+    return "\n".join(formatted_messages)
+
+
+async def validate_static_answer_with_llm(
+    query: str,
+    answer: str,
+    conversation_history: Optional[List[Dict[str, Any]]],
+    qa_generator,
+    log_step
+) -> bool:
+    """
+    Validate that the generated static answer truly addresses the query,
+    considering the entire conversation history.
+    """
+    if not answer:
+        return False
+    
+    if not qa_generator or not getattr(qa_generator, "client", None):
+        log_step("static_answer_validator_skipped", {
+            "reason": "no_llm_client_available"
+        }, "warning")
+        return True  # allow response if validator unavailable
+    
+    history_text = _format_conversation_history_for_validation(conversation_history) or "No prior messages."
+    
+    validation_prompt = f"""
+Conversation History:
+{history_text}
+
+Current User Query:
+{query}
+
+Candidate Answer:
+{answer}
+
+Does the candidate answer directly and accurately address the user's query while respecting the conversation context?
+
+Respond with exactly one word: "yes" or "no".
+"""
+    
+    try:
+        response = qa_generator.client.chat.completions.create(
+            model=os.getenv("STATIC_VALIDATION_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": "You are a strict validator that only replies 'yes' or 'no'."},
+                {"role": "user", "content": validation_prompt}
+            ],
+            temperature=0.0,
+            max_tokens=3
+        )
+        decision = (response.choices[0].message.content or "").strip().lower()
+        is_valid = decision.startswith("y")
+        log_step("static_answer_validation_complete", {
+            "decision": decision,
+            "is_valid": is_valid
+        })
+        return is_valid
+    except Exception as e:
+        log_step("static_answer_validation_error", {
+            "error": str(e)
+        }, "warning")
+        return True  # fail open on validator errors
+
+
 async def route_query_llm(
     query: str,
     conversation_history: Optional[List[Dict[str, Any]]],
@@ -904,10 +985,12 @@ async def processUserQuery(
             static_chunks = rerank_static_chunks(static_chunks)
             # Limit to max_chunks after reranking
             static_chunks = static_chunks[:max_chunks]
-            log_step("static_retrieval_complete", {"chunks_count": len(static_chunks)})
+            log_step("static_retrieval_complete", {
+                "chunks_count": len(static_chunks)
+            })
             
-            # Simple decision logic: if chunks found, answer; otherwise fallback
-            if static_chunks and len(static_chunks) > 0:
+            qa_result = None
+            if static_chunks:
                 # Chunks found - proceed with answer
                 qa_result = await qa_generator.generate_answer(
                     query=analyzed_query,
@@ -919,15 +1002,32 @@ async def processUserQuery(
                     route_confidence=confidence
                 )
                 
-                log_step("static_route_complete", {
-                    "chunks_used": qa_result.get('chunks_used', 0),
-                    "search_method": qa_result.get('search_method', 'unknown')
-                })
-            else:
-                # No chunks found - fallback to internet search
-                log_step("static_no_chunks_fallback", {
+                validator_passed = await validate_static_answer_with_llm(
+                    query=userMessage,
+                    answer=qa_result.get('answer', ''),
+                    conversation_history=conversationHistory,
+                    qa_generator=qa_generator,
+                    log_step=log_step
+                )
+                
+                if validator_passed:
+                    log_step("static_route_complete", {
+                        "chunks_used": qa_result.get('chunks_used', 0),
+                        "search_method": qa_result.get('search_method', 'unknown'),
+                        "validator_passed": True
+                    })
+                else:
+                    log_step("static_validator_rejected", {
+                        "note": "LLM validator flagged static answer as irrelevant",
+                        "validator_passed": False
+                    })
+                    qa_result = None
+            
+            if not qa_result:
+                fallback_reason = "no_chunks" if not static_chunks else "validator_rejected"
+                log_step("static_fallback_triggered", {
                     "route": "static",
-                    "note": "No chunks found - falling back to internet search"
+                    "fallback_reason": fallback_reason
                 })
                 
                 internet_result = await generate_internet_search_response(
