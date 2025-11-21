@@ -236,40 +236,27 @@ class PolkassemblyDataFetcher:
 
         return all_comments[:max_items]
 
-def fetch_comments_data(network: str = "polkadot", data_dir: str = None, max_items: int = 1000):
-    """Main function to fetch comments data for a specific network"""
-    # Use the specified directory path
-    if not data_dir:
-        data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
-    
-    logger.info(f"Storing comments data in: {data_dir}")
-    
-    try:
-        logger.info(f"Starting comments fetch for {network}...")
-        
-        # Initialize fetcher with specified data directory
-        fetcher = PolkassemblyDataFetcher(network=network, data_dir=data_dir)
-        
-        # Fetch all comments
-        comments_data = fetcher.fetch_all_comments(max_items=max_items)
-        
-        if comments_data:
-            # Save comments data
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{network}_comments_{timestamp}.json"
-            fetcher.save_to_file(comments_data, filename)
-            logger.info(f"Completed comments fetch for {network}. Total comments: {len(comments_data)}")
-        else:
-            logger.warning(f"No comments data fetched for {network}")
-            
-    except Exception as e:
-        logger.error(f"Error processing comments for network {network}: {e}")
+
+def _resolve_data_dir(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+
+    env_dir = os.getenv("ONCHAIN_DATA_DIR")
+    if env_dir:
+        return env_dir
+
+    base_path = os.getenv("BASE_PATH")
+    if base_path:
+        return os.path.join(base_path, "data", "onchain_data")
+
+    script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(script_dir, "data", "onchain_data")
+
 
 def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
     """Main function to fetch onchain data for all supported networks"""
     # Use the specified directory path
-    if not data_dir:
-        data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
+    data_dir = _resolve_data_dir(data_dir)
     
     logger.info(f"Storing onchain data in: {data_dir}")
     
@@ -294,5 +281,3 @@ if __name__ == "__main__":
     # Fetch data for all networks and proposal types
     print(str(os.getenv("BASE_PATH")) + "/data/onchain_data")
     fetch_onchain_data(max_items_per_type=10)  # Adjust as needed
-    # Example: Fetch all comments for polkadot
-    fetch_comments_data(network="polkadot", max_items=1000)
