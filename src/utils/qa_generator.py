@@ -351,7 +351,7 @@ class QAGenerator:
         """Analyze query with conversation history to add memory/context awareness"""
         try:
             # Early return if no context needed
-            if not conversation_history or not self.gemini_client:
+            if not conversation_history or not hasattr(self, 'client') or not self.client:
                 return query
             
             # Optimize: Only use recent conversation history (last 5-10 messages)
@@ -440,11 +440,26 @@ Return ONLY a JSON object with this exact structure:
 
 No explanations, no markdown, just the JSON."""
 
-            # Get analysis from Gemini with retry logic
-            gemini_response = self._get_gemini_response_with_retry(analysis_prompt)
-            
-            # Parse response with better error handling
-            analyzed_query = self._parse_gemini_response(gemini_response, query)
+            # Get analysis from OpenAI
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a query context analyzer. Return only valid JSON."},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                openai_response = response.choices[0].message.content
+                if not openai_response:
+                    return query
+                
+                # Parse response with better error handling
+                analyzed_query = self._parse_gemini_response(openai_response, query)
+            except Exception as e:
+                logger.warning(f"OpenAI query analysis failed: {e}, returning original query")
+                return query
             
             # Validation: ensure analyzed query is not empty or just whitespace
             if not analyzed_query or analyzed_query.strip() == "":
@@ -555,7 +570,7 @@ No explanations, no markdown, just the JSON."""
                 return quote_match.group(2).strip()
             
             # Final fallback: log and return original
-            logger.warning(f"Could not parse Gemini response: {response[:200]}")
+            logger.warning(f"Could not parse LLM response: {response[:200]}")
             return fallback_query
 
     def _determine_table_from_query(self, query: str) -> Optional[str]:

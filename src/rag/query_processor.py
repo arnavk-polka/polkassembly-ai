@@ -1317,6 +1317,38 @@ async def processUserQuery(
             )
             
             hybrid_dynamic_available = qa_result.get('success', False) and qa_result.get('result_count', 0) > 0
+            result_count = qa_result.get('result_count', 0)
+            
+            if not hybrid_static_available and not hybrid_dynamic_available:
+                log_step("hybrid_fallback_triggered", {
+                    "route": "hybrid",
+                    "fallback_reason": "no_static_or_dynamic_data",
+                    "static_available": hybrid_static_available,
+                    "dynamic_available": hybrid_dynamic_available,
+                    "result_count": result_count
+                })
+                
+                internet_result = await generate_internet_search_response(
+                    query=analyzed_query,
+                    qa_generator=qa_generator,
+                    log_step=log_step,
+                    route=route,
+                    conversation_history=conversationHistory
+                )
+                
+                internet_result['route'] = route
+                internet_result['route_confidence'] = confidence
+                internet_result['processing_time_ms'] = (datetime.now() - pipeline_start).total_seconds() * 1000
+                
+                log_step("pipeline_complete", {
+                    "route": route,
+                    "confidence": confidence,
+                    "processing_time_ms": internet_result['processing_time_ms'],
+                    "internet_fallback": True,
+                    "success": True
+                })
+                
+                return internet_result
             
             log_step("hybrid_route_complete", {
                 "chunks_used": qa_result.get('chunks_used', 0),

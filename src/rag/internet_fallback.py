@@ -188,7 +188,8 @@ Provide your answer:
             
             try:
                 response = qa_generator.gemini_client.get_response(llm_prompt)
-                formatted_answer = response.strip()
+                answer_text = response.strip()
+                formatted_answer = f"I found no related data to your query. Here's what I found on the internet: {answer_text}"
                 
                 log_step("internet_fallback_complete", {
                     "response_length": len(formatted_answer),
@@ -235,7 +236,8 @@ CRITICAL: NEVER generate placeholder data, dummy data, example data, or fake dat
                 max_tokens=500
             )
             answer = response.choices[0].message.content
-            formatted_answer = answer.strip()
+            answer_text = answer.strip()
+            formatted_answer = f"I found no related data to your query. Here's what I found on the internet: {answer_text}"
             
             log_step("internet_fallback_complete", {
                 "response_length": len(formatted_answer),

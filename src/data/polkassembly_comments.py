@@ -37,36 +37,6 @@ def _get_db_config() -> Dict[str, Any]:
 TABLE_NAME = os.getenv("POLKASSEMBLY_COMMENTS_TABLE", "governance_comments")
 
 
-def _ensure_comments_table(conn):
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-        id TEXT PRIMARY KEY,
-        network TEXT,
-        proposal_type TEXT,
-        index_or_hash TEXT,
-        parent_comment_id TEXT,
-        user_id NUMERIC,
-        content TEXT,
-        created_at TIMESTAMPTZ,
-        updated_at TIMESTAMPTZ,
-        is_deleted BOOLEAN,
-        data_source TEXT,
-        author_address TEXT,
-        ai_sentiment TEXT,
-        history JSONB,
-        public_user JSONB,
-        children JSONB,
-        reactions JSONB,
-        source_file TEXT,
-        fetched_at TIMESTAMPTZ,
-        raw JSONB
-    );
-    """
-    with conn.cursor() as cur:
-        cur.execute(create_sql)
-    conn.commit()
-
-
 def _prepare_records(comments: List[Dict[str, Any]], source_file: str, fetched_at: datetime):
     for comment in comments:
         yield (
@@ -163,8 +133,6 @@ def fetch_comments_data(
         source_file = os.path.join(data_dir, filename)
 
         with psycopg2.connect(**db_config) as conn:
-            _ensure_comments_table(conn)
-
             batch = []
             for record in _prepare_records(comments_data, source_file, fetched_at):
                 batch.append(record)
