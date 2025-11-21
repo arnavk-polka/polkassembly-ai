@@ -1818,6 +1818,27 @@ DATABASE SCHEMA:
                 -Don't use SELECT "title", "index", "onchaininfo_status", "createdat" FROM governance_data WHERE "source_proposal_type" ILIKE \'%treasury%\' AND "onchaininfo_status" = \'Voting\' LIMIT 10;
                 -Don't use "onchaininfo_status" = \'Voting\' since Voting is not in params, use nearest which can be "onchaininfo_status" = \'Deciding\'
                 -You can find all possible supported params in description of DATABSE SCHEMA.
+            13. CRITICAL STATUS VALUE MAPPING: Map user-friendly status terms to actual database values:
+                - For TREASURY PROPOSALS (source_proposal_type = 'TreasuryProposal'):
+                  * "executed" -> "Awarded" (treasury proposals use "Awarded" not "Executed")
+                  * "awarded" -> "Awarded"
+                  * "passed" -> "Awarded"
+                - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
+                  * "executed" -> "Executed" (referendums can have "Executed" status)
+                  * "passed" -> "Passed" or "Executed" (depending on context)
+                  * "confirmed" -> "Confirmed"
+                - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
+                  * "executed" -> "Awarded" or "Claimed" (depending on context)
+                - General status mappings:
+                  * "voting" or "in voting" -> "Deciding" (for referendums, proposals)
+                  * "active" -> "Deciding" or "Confirming" (depending on context)
+                  * "rejected" -> "Rejected"
+                  * "cancelled" -> "Cancelled"
+                  * "killed" -> "Killed"
+                  * "timed out" -> "TimedOut"
+                - Valid status values vary by proposal type - check what statuses actually exist for each type
+                - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
+                - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
 
 
             CRITICAL NULL VALUE HANDLING:
@@ -2032,6 +2053,27 @@ DATABASE SCHEMA:
                 -Don't use SELECT "title", "index", "onchaininfo_status", "createdat" FROM governance_data WHERE "source_proposal_type" ILIKE \'%treasury%\' AND "onchaininfo_status" = \'Voting\' LIMIT 10;
                 -Don't use "onchaininfo_status" = \'Voting\' since Voting is not in params, use nearest which can be "onchaininfo_status" = \'Deciding\'
                 -You can find all possible supported params in description of DATABSE SCHEMA.
+            13. CRITICAL STATUS VALUE MAPPING: Map user-friendly status terms to actual database values:
+                - For TREASURY PROPOSALS (source_proposal_type = 'TreasuryProposal'):
+                  * "executed" -> "Awarded" (treasury proposals use "Awarded" not "Executed")
+                  * "awarded" -> "Awarded"
+                  * "passed" -> "Awarded"
+                - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
+                  * "executed" -> "Executed" (referendums can have "Executed" status)
+                  * "passed" -> "Passed" or "Executed" (depending on context)
+                  * "confirmed" -> "Confirmed"
+                - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
+                  * "executed" -> "Awarded" or "Claimed" (depending on context)
+                - General status mappings:
+                  * "voting" or "in voting" -> "Deciding" (for referendums, proposals)
+                  * "active" -> "Deciding" or "Confirming" (depending on context)
+                  * "rejected" -> "Rejected"
+                  * "cancelled" -> "Cancelled"
+                  * "killed" -> "Killed"
+                  * "timed out" -> "TimedOut"
+                - Valid status values vary by proposal type - check what statuses actually exist for each type
+                - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
+                - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
 
 
             CRITICAL NULL VALUE HANDLING:
