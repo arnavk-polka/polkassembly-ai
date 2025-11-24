@@ -14,6 +14,7 @@ from datetime import datetime
 from .greeting_handler import handle_generic_query_llm
 from .clarification import generate_clarification_question
 from .internet_fallback import generate_internet_search_response
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,9 @@ false
         
         return is_ambiguous
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            logger.error(f"Insufficient quota error in LLM ambiguity check: {e}")
+            raise
         logger.error(f"Error in LLM ambiguity check: {e}, defaulting to False")
         return False
 
@@ -643,6 +647,12 @@ Respond with exactly one word: "yes" or "no".
         })
         return is_valid
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            log_step("static_answer_validation_error", {
+                "error": str(e),
+                "quota_error": True
+            }, "warning")
+            raise
         log_step("static_answer_validation_error", {
             "error": str(e)
         }, "warning")
@@ -786,6 +796,9 @@ Now respond for this query:
                     "confidence": probability
                 }
             except Exception as e:
+                if is_insufficient_quota_error(e):
+                    log_step("router_llm_error", {"error": str(e), "quota_error": True}, "error")
+                    raise
                 log_step("router_llm_error", {"error": str(e)}, "error")
         else:
             log_step("router_llm_fallback", {"reason": "no_openai_client"}, "warning")
@@ -801,6 +814,9 @@ Now respond for this query:
         }
             
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            log_step("router_llm_error", {"error": str(e), "quota_error": True}, "error")
+            raise
         log_step("router_llm_error", {"error": str(e)}, "error")
         return {
             "route": "static",
@@ -1430,6 +1446,18 @@ async def processUserQuery(
             "error": str(e),
             "processing_time_ms": processing_time
         }, "error")
+        
+        if is_insufficient_quota_error(e):
+            return {
+                'answer': get_quota_error_message(),
+                'sources': [],
+                'chunks_used': 0,
+                'search_method': 'error',
+                'route': 'generic',
+                'route_confidence': 0.0,
+                'processing_time_ms': processing_time,
+                'error': str(e)
+            }
         
         return {
             'answer': "I encountered an error processing your query. Please try again.",

@@ -5,6 +5,7 @@ Internet search fallback for low-confidence queries with no data.
 from typing import Dict, Any, Optional, List
 import logging
 import os
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,9 @@ Task:
         log_step("contextual_query_llm_success", {"query": enhanced_query[:150]})
         return enhanced_query
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            log_step("contextual_query_llm_error", {"error": str(e), "quota_error": True}, "error")
+            raise
         log_step("contextual_query_llm_error", {"error": str(e)}, "error")
         return _build_contextual_search_query_heuristic(query, route)
 
@@ -226,39 +230,56 @@ CRITICAL: NEVER generate placeholder data, dummy data, example data, or fake dat
             
             log_step("internet_fallback_llm_call", {"model": qa_generator.model})
             
-            response = qa_generator.client.chat.completions.create(
-                model=qa_generator.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": llm_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-            answer = response.choices[0].message.content
-            answer_text = answer.strip()
-            formatted_answer = f"I found no related data to your query. Here's what I found on the internet: {answer_text}"
-            
-            log_step("internet_fallback_complete", {
-                "response_length": len(formatted_answer),
-                "model": qa_generator.model
-            })
-            
-            return {
-                'answer': formatted_answer,
-                'sources': [],
-                'confidence': 0.5,
-                'follow_up_questions': [
-                    "How does Polkadot's governance system work?",
-                    "What are the benefits of staking DOT tokens?",
-                    "How do parachains connect to Polkadot?"
-                ],
-                'context_used': bool(conversation_history),
-                'model_used': qa_generator.model,
-                'chunks_used': 0,
-                'search_method': 'internet_fallback_openai',
-                'internet_fallback': True
-            }
+            try:
+                response = qa_generator.client.chat.completions.create(
+                    model=qa_generator.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": llm_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                answer = response.choices[0].message.content
+                answer_text = answer.strip()
+                formatted_answer = f"I found no related data to your query. Here's what I found on the internet: {answer_text}"
+                
+                log_step("internet_fallback_complete", {
+                    "response_length": len(formatted_answer),
+                    "model": qa_generator.model
+                })
+                
+                return {
+                    'answer': formatted_answer,
+                    'sources': [],
+                    'confidence': 0.5,
+                    'follow_up_questions': [
+                        "How does Polkadot's governance system work?",
+                        "What are the benefits of staking DOT tokens?",
+                        "How do parachains connect to Polkadot?"
+                    ],
+                    'context_used': bool(conversation_history),
+                    'model_used': qa_generator.model,
+                    'chunks_used': 0,
+                    'search_method': 'internet_fallback_openai',
+                    'internet_fallback': True
+                }
+            except Exception as openai_error:
+                if is_insufficient_quota_error(openai_error):
+                    log_step("internet_fallback_openai_error", {"error": str(openai_error), "quota_error": True}, "error")
+                    return {
+                        'answer': get_quota_error_message(),
+                        'sources': [],
+                        'confidence': 0.0,
+                        'follow_up_questions': [],
+                        'context_used': bool(conversation_history),
+                        'model_used': 'error',
+                        'chunks_used': 0,
+                        'search_method': 'quota_error',
+                        'internet_fallback': True
+                    }
+                log_step("internet_fallback_openai_error", {"error": str(openai_error)}, "error")
+                raise
         
         fallback_answer = f"I'm unable to provide an answer for your question: \"{query}\" at this time. Please try rephrasing your question or ask about Polkadot/Kusama governance topics."
         return {
@@ -278,6 +299,20 @@ CRITICAL: NEVER generate placeholder data, dummy data, example data, or fake dat
         }
         
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            log_step("internet_fallback_error", {"error": str(e), "quota_error": True}, "error")
+            logger.error(f"Internet fallback quota error: {e}")
+            return {
+                'answer': get_quota_error_message(),
+                'sources': [],
+                'confidence': 0.0,
+                'follow_up_questions': [],
+                'context_used': False,
+                'model_used': 'error',
+                'chunks_used': 0,
+                'search_method': 'quota_error',
+                'internet_fallback': True
+            }
         log_step("internet_fallback_error", {"error": str(e)}, "error")
         logger.error(f"Internet fallback error: {e}")
         

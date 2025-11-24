@@ -4,6 +4,7 @@ Clarification handler for low-confidence queries.
 
 from typing import Dict, Any, Optional, List
 import logging
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,18 @@ You help clarify ambiguous user queries by asking one specific question. Always 
         else:
             raise Exception("No LLM client available")
     except Exception as e:
+        if is_insufficient_quota_error(e):
+            log_step("clarification_llm_error", {"error": str(e), "quota_error": True}, "error")
+            return {
+                'answer': get_quota_error_message(),
+                'sources': [],
+                'confidence': router_confidence,
+                'follow_up_questions': [],
+                'context_used': False,
+                'model_used': 'error',
+                'chunks_used': 0,
+                'search_method': 'quota_error'
+            }
         log_step("clarification_llm_error", {"error": str(e)}, "error")
         # Minimal fallback - still try to be specific
         if normalized_route == "dynamic":

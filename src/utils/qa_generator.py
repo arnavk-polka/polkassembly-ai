@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
+
 class QAGenerator:
     """Generate answers using OpenAI based on retrieved document chunks"""
     
@@ -1048,6 +1050,18 @@ Respond with ONLY valid JSON:
                     answer = response.choices[0].message.content
                     logger.info("OpenAI fallback response received successfully")
             except Exception as llm_error:
+                if is_insufficient_quota_error(llm_error):
+                    logger.error(f"Insufficient quota error in LLM response generation: {llm_error}")
+                    return {
+                        'answer': get_quota_error_message(),
+                        'sources': [],
+                        'confidence': 0.0,
+                        'context_used': False,
+                        'model_used': 'error',
+                        'chunks_used': len(chunks),
+                        'follow_up_questions': [],
+                        'search_method': 'quota_error'
+                    }
                 logger.error(f"Error in LLM response generation: {llm_error}")
                 # Return a user-friendly error response
                 return {
