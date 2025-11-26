@@ -562,7 +562,10 @@ class DataFlattener:
         """Process all JSON files in the directory"""
         print(f"DEBUG: Looking for JSON files in: {self.data_dir}")
         print(f"DEBUG: Directory exists: {self.data_dir.exists()}")
-        json_files = list(self.data_dir.glob("*.json"))
+        json_files = [
+            f for f in self.data_dir.glob("*.json")
+            if "_comments_" not in f.name
+        ]
         print(f"DEBUG: Found JSON files: {[f.name for f in json_files[:5]]}")  # Show first 5
         logger.info(f"Found {len(json_files)} JSON files to process")
         

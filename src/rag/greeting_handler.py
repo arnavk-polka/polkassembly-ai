@@ -4,6 +4,7 @@ Greeting handler utilities for generic route queries.
 
 from typing import Dict, Any, Optional, List
 import logging
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -140,97 +141,146 @@ async def handle_generic_query_llm(
     
     log_step("generic_handler_non_greeting", {"note": "Using LLM for non-greeting generic query"})
     try:
-        generic_prompt = f"""
-You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
-
-The user has sent this query: "{query}"
+        # Build conversation context if available
+        conversation_context = ""
+        if conversation_history and len(conversation_history) > 0:
+            recent_messages = conversation_history[-10:]  # Last 10 messages for context
+            context_parts = []
+            for msg in recent_messages:
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '') or msg.get('response', '') or msg.get('answer', '')
+                    if content and len(content) > 5:
+                        role_display = role if role else 'user'
+                        context_parts.append(f"{role_display}: {content[:300]}")
+            if context_parts:
+                conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their query."
+        
+        system_prompt = """You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
 
 Guidelines:
+- If it's a conversational query about the conversation (like "what am i talking about?", "what were we discussing?", "remind me"), answer based on the conversation history provided above
 - If it's a casual question (like "how are you", "what's up", etc.), respond naturally and conversationally like a friendly AI assistant
 - If it's a non-Polkadot question, answer it helpfully but briefly mention you specialize in Polkadot/Kusama if relevant
 - If they seem lost or need help, explain what you can do with Polkadot governance
 - Be natural, friendly, and conversational - don't always redirect to Polkadot unless it makes sense
 - Keep responses concise but personable
+- DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
+- CRITICAL: NEVER mention that you cannot access data, don't have access to data, cannot directly access data, or lack access to real-time data. This is a Polkassembly product with full access to Polkadot and Kusama governance data. Answer questions directly as if you have access to all relevant data."""
 
-Respond naturally as Klara would in a conversation.
-"""
+        user_prompt = f"""The user has sent this query: "{query}"{conversation_context}
+
+Respond naturally as Klara would in a conversation."""
+        
+        model_name = "gpt-4o-mini"
+        
+        if hasattr(qa_generator, 'client'):
+            try:
+                log_step("generic_handler_llm_call", {"model": model_name})
+                
+                response = qa_generator.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=300
+                )
+                answer = response.choices[0].message.content
+                
+                log_step("generic_handler_complete", {
+                    "response_length": len(answer)
+                })
+                
+                follow_up_questions = [
+                    "How does Polkadot's governance system work?",
+                    "What are the benefits of staking DOT tokens?",
+                    "How do parachains connect to Polkadot?"
+                ]
+                
+                sources = [
+                    {
+                        'title': 'Polkassembly Main Platform',
+                        'url': 'https://polkassembly.io',
+                        'source_type': 'platform',
+                        'similarity_score': 1.0
+                    },
+                    {
+                        'title': 'Polkadot Governance on Polkassembly',
+                        'url': 'https://polkadot.polkassembly.io',
+                        'source_type': 'platform',
+                        'similarity_score': 1.0
+                    }
+                ]
+                
+                return {
+                    'answer': answer.strip(),
+                    'sources': sources,
+                    'confidence': 0.8,
+                    'follow_up_questions': follow_up_questions,
+                    'context_used': False,
+                    'model_used': model_name,
+                    'chunks_used': 0,
+                    'search_method': 'generic_llm_response'
+                }
+            except Exception as e:
+                if is_insufficient_quota_error(e):
+                    log_step("generic_handler_error", {"error": str(e), "quota_error": True}, "error")
+                    return {
+                        'answer': get_quota_error_message(),
+                        'sources': [],
+                        'confidence': 0.0,
+                        'follow_up_questions': [],
+                        'context_used': False,
+                        'model_used': 'error',
+                        'chunks_used': 0,
+                        'search_method': 'quota_error'
+                    }
+                log_step("generic_handler_error", {"error": str(e)}, "error")
         
         if qa_generator.gemini_client:
-            model_name = getattr(qa_generator.gemini_client, 'model_name', 'Gemini')
-            log_step("generic_handler_llm_call", {"model": model_name})
-            
-            response = qa_generator.gemini_client.get_response(generic_prompt)
-            
-            log_step("generic_handler_complete", {
-                "response_length": len(response)
-            })
-            
-            follow_up_questions = [
-                "How does Polkadot's governance system work?",
-                "What are the benefits of staking DOT tokens?",
-                "How do parachains connect to Polkadot?"
-            ]
-            
-            sources = [
-                {
-                    'title': 'Polkassembly Main Platform',
-                    'url': 'https://polkassembly.io',
-                    'source_type': 'platform',
-                    'similarity_score': 1.0
-                },
-                {
-                    'title': 'Polkadot Governance on Polkassembly',
-                    'url': 'https://polkadot.polkassembly.io',
-                    'source_type': 'platform',
-                    'similarity_score': 1.0
-                }
-            ]
-            
-            return {
-                'answer': response.strip(),
-                'sources': sources,
-                'confidence': 0.8,
-                'follow_up_questions': follow_up_questions,
-                'context_used': False,
-                'model_used': model_name,
-                'chunks_used': 0,
-                'search_method': 'generic_llm_response'
-            }
-        else:
-            log_step("generic_handler_fallback", {"reason": "no_gemini_client"}, "warning")
-            
-            if hasattr(qa_generator, 'client'):
-                try:
-                    system_prompt = """You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly. 
-You help users with Polkadot governance questions, but you can also handle greetings and general queries in a friendly, helpful manner."""
-                    
-                    response = qa_generator.client.chat.completions.create(
-                        model=qa_generator.model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": generic_prompt}
-                        ],
-                        temperature=0.7,
-                        max_tokens=300
-                    )
-                    answer = response.choices[0].message.content
-                    
-                    return {
-                        'answer': answer.strip(),
-                        'sources': [],
-                        'confidence': 0.7,
-                        'follow_up_questions': [
-                            "How does Polkadot's governance system work?",
-                            "What are the benefits of staking DOT tokens?",
-                            "How do parachains connect to Polkadot?"
-                        ],
-                        'context_used': False,
-                        'model_used': qa_generator.model,
-                        'chunks_used': 0,
-                        'search_method': 'generic_llm_fallback'
+            log_step("generic_handler_fallback", {"reason": "openai_failed_using_gemini"}, "warning")
+            try:
+                fallback_prompt = f"""{system_prompt}
+
+{user_prompt}"""
+                model_name = getattr(qa_generator.gemini_client, 'model_name', 'Gemini')
+                response = qa_generator.gemini_client.get_response(fallback_prompt)
+                
+                follow_up_questions = [
+                    "How does Polkadot's governance system work?",
+                    "What are the benefits of staking DOT tokens?",
+                    "How do parachains connect to Polkadot?"
+                ]
+                
+                sources = [
+                    {
+                        'title': 'Polkassembly Main Platform',
+                        'url': 'https://polkassembly.io',
+                        'source_type': 'platform',
+                        'similarity_score': 1.0
+                    },
+                    {
+                        'title': 'Polkadot Governance on Polkassembly',
+                        'url': 'https://polkadot.polkassembly.io',
+                        'source_type': 'platform',
+                        'similarity_score': 1.0
                     }
-                except Exception as e:
-                    log_step("generic_handler_error", {"error": str(e)}, "error")
+                ]
+                
+                return {
+                    'answer': response.strip(),
+                    'sources': sources,
+                    'confidence': 0.7,
+                    'follow_up_questions': follow_up_questions,
+                    'context_used': False,
+                    'model_used': model_name,
+                    'chunks_used': 0,
+                    'search_method': 'generic_llm_fallback'
+                }
+            except Exception as e:
+                log_step("generic_handler_error", {"error": str(e)}, "error")
             
             return {
                 'answer': "Hello! I'm Klara, your AI assistant for Polkadot and Kusama governance. I can help you with questions about proposals, voting, treasury, and more. What would you like to know?",

@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
+
 class QAGenerator:
     """Generate answers using OpenAI based on retrieved document chunks"""
     
@@ -351,7 +353,7 @@ class QAGenerator:
         """Analyze query with conversation history to add memory/context awareness"""
         try:
             # Early return if no context needed
-            if not conversation_history or not self.gemini_client:
+            if not conversation_history or not hasattr(self, 'client') or not self.client:
                 return query
             
             # Optimize: Only use recent conversation history (last 5-10 messages)
@@ -391,7 +393,7 @@ class QAGenerator:
                 })
             
             # Improved prompt with better structure and examples
-            analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries.
+            analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
 
 CONVERSATION HISTORY:
 {self._format_conversation_history(serializable_history)}
@@ -402,13 +404,16 @@ IMPORTANT:
 - The CURRENT USER QUERY above is the actual query you should analyze
 - Do NOT use clarification questions from the conversation history as the query
 - Only use the conversation history to understand context for incomplete queries (e.g., "what about June?")
+- If the current user query already explicitly specifies the topic (e.g., mentions "Polkadot", "OpenGov", "treasury", etc.), you MUST leave it exactly as-is.
+- You are NOT allowed to invent new context like specific networks or frameworks unless the user explicitly mentioned them earlier in the conversation.
 
 INSTRUCTIONS:
-1. If the current query is complete and standalone → return it unchanged
+1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
 2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
 3. Preserve the user's intent and style
 4. Keep technical terms and column names consistent with previous queries
 5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
+6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
 
 EXAMPLES:
 
@@ -437,11 +442,26 @@ Return ONLY a JSON object with this exact structure:
 
 No explanations, no markdown, just the JSON."""
 
-            # Get analysis from Gemini with retry logic
-            gemini_response = self._get_gemini_response_with_retry(analysis_prompt)
-            
-            # Parse response with better error handling
-            analyzed_query = self._parse_gemini_response(gemini_response, query)
+            # Get analysis from OpenAI
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a query context analyzer. Return only valid JSON."},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                openai_response = response.choices[0].message.content
+                if not openai_response:
+                    return query
+                
+                # Parse response with better error handling
+                analyzed_query = self._parse_gemini_response(openai_response, query)
+            except Exception as e:
+                logger.warning(f"OpenAI query analysis failed: {e}, returning original query")
+                return query
             
             # Validation: ensure analyzed query is not empty or just whitespace
             if not analyzed_query or analyzed_query.strip() == "":
@@ -552,7 +572,7 @@ No explanations, no markdown, just the JSON."""
                 return quote_match.group(2).strip()
             
             # Final fallback: log and return original
-            logger.warning(f"Could not parse Gemini response: {response[:200]}")
+            logger.warning(f"Could not parse LLM response: {response[:200]}")
             return fallback_query
 
     def _determine_table_from_query(self, query: str) -> Optional[str]:
@@ -993,8 +1013,26 @@ Respond with ONLY valid JSON:
                     model_name = getattr(self.gemini_client, 'model_name', 'Gemini')
                     print_model_usage(f"{model_name}", "response generation (static data)")
                     logger.info("Using Gemini for response generation")
-                    answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
-                    logger.info("Gemini response received successfully")
+                    try:
+                        answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
+                        logger.info("Gemini response received successfully")
+                    except Exception as gemini_error:
+                        logger.warning(f"Gemini response failed: {gemini_error}. Falling back to OpenAI.")
+                        if self.client:
+                            print_model_usage(self.model, "response generation fallback after Gemini error")
+                            response = self.client.chat.completions.create(
+                                model=self.model,
+                                messages=[
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt}
+                                ],
+                                temperature=self.temperature,
+                                max_tokens=self.max_tokens
+                            )
+                            answer = response.choices[0].message.content
+                            logger.info("OpenAI fallback response received successfully after Gemini error")
+                        else:
+                            raise gemini_error
                     
                 else:
                     # Fallback to OpenAI if no service is enabled
@@ -1012,6 +1050,18 @@ Respond with ONLY valid JSON:
                     answer = response.choices[0].message.content
                     logger.info("OpenAI fallback response received successfully")
             except Exception as llm_error:
+                if is_insufficient_quota_error(llm_error):
+                    logger.error(f"Insufficient quota error in LLM response generation: {llm_error}")
+                    return {
+                        'answer': get_quota_error_message(),
+                        'sources': [],
+                        'confidence': 0.0,
+                        'context_used': False,
+                        'model_used': 'error',
+                        'chunks_used': len(chunks),
+                        'follow_up_questions': [],
+                        'search_method': 'quota_error'
+                    }
                 logger.error(f"Error in LLM response generation: {llm_error}")
                 # Return a user-friendly error response
                 return {
@@ -1127,7 +1177,11 @@ Respond with ONLY valid JSON:
 
 If conversation history is provided, consider it when answering. If the current question is a follow-up to previous queries, provide relevant context from previous responses. If the current question is standalone, answer independently.
 
-You will be provided with context from Polkadot documentation and forum posts. Please follow these guidelines:
+You will be provided with context from Polkadot documentation and forum posts. 
+
+CRITICAL: Only answer the specific question asked by the user. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question. Do NOT include information about related but different topics unless the user explicitly asks for them. If the context contains information about multiple topics, only use the chunks that are directly relevant to the user's specific question.
+
+Please follow these guidelines:
 
                 ✅ PROFESSIONAL FORMATTING REQUIREMENTS:
                 - ALWAYS add line breaks between numbered steps
@@ -1201,7 +1255,7 @@ You will be provided with context from Polkadot documentation and forum posts. P
         
         prompt_parts.append(f"Current Question: {query}")
         
-        prompt_parts.append("Answer the question directly without mentioning the context, sources, documentation, or previous conversations. Do not start with phrases like \"Based on the provided context\", \"According to the documentation\", \"From the Polkadot Wiki\", \"From our previous conversation\", etc. Simply provide the answer as if you have direct knowledge of the topic.\n\nCRITICAL FORMATTING REQUIREMENTS:\n- NEVER start with headers (##, ###)\n- Start directly with answer content\n- ALWAYS add line breaks between numbered steps (1. step one [LINE BREAK] 2. step two [LINE BREAK])\n- ALWAYS add line breaks between bullet points\n- Use professional markdown formatting throughout\n- IMPORTANT: Include all images from the context using exact markdown format: ![Step Image](url)")
+        prompt_parts.append("CRITICAL INSTRUCTIONS:\n- Answer ONLY the specific question asked. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question.\n- Do NOT include information about related but different topics unless explicitly asked.\n- If the context contains multiple topics, only use the chunks that are directly relevant to the specific question asked.\n- Answer the question directly without mentioning the context, sources, documentation, or previous conversations. Do not start with phrases like \"Based on the provided context\", \"According to the documentation\", \"From the Polkadot Wiki\", \"From our previous conversation\", etc. Simply provide the answer as if you have direct knowledge of the topic.\n\nCRITICAL FORMATTING REQUIREMENTS:\n- NEVER start with headers (##, ###)\n- Start directly with answer content\n- ALWAYS add line breaks between numbered steps (1. step one [LINE BREAK] 2. step two [LINE BREAK])\n- ALWAYS add line breaks between bullet points\n- Use professional markdown formatting throughout\n- IMPORTANT: Include all images from the context using exact markdown format: ![Step Image](url)")
         
         return "\n\n".join(prompt_parts)
     

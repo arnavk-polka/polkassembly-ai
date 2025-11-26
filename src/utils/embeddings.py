@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from chromadb.config import Settings
 import numpy as np
 from src.rag.config import Config
+from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -85,6 +86,9 @@ class EmbeddingManager:
                         break
                         
                     except openai.RateLimitError as e:
+                        if is_insufficient_quota_error(e):
+                            logger.error(f"Insufficient quota error generating embeddings: {e}")
+                            raise
                         if attempt < max_retries - 1:
                             wait_time = 2 ** attempt
                             logger.warning(f"Rate limit hit, waiting {wait_time} seconds...")
@@ -92,6 +96,9 @@ class EmbeddingManager:
                         else:
                             raise e
                     except Exception as e:
+                        if is_insufficient_quota_error(e):
+                            logger.error(f"Insufficient quota error generating embeddings: {e}")
+                            raise
                         logger.error(f"Error generating embeddings for batch {i//batch_size + 1}: {e}")
                         if attempt < max_retries - 1:
                             time.sleep(1)
@@ -102,6 +109,9 @@ class EmbeddingManager:
                 time.sleep(0.1)
                 
             except Exception as e:
+                if is_insufficient_quota_error(e):
+                    logger.error(f"Insufficient quota error in embeddings batch: {e}")
+                    raise
                 logger.error(f"Failed to generate embeddings for batch {i//batch_size + 1}: {e}")
                 # Add empty embeddings for failed batch
                 embeddings.extend([[0.0] * 1536] * len(batch))  # ada-002 has 1536 dimensions
@@ -242,6 +252,9 @@ class EmbeddingManager:
             return results
             
         except Exception as e:
+            if is_insufficient_quota_error(e):
+                logger.error(f"Insufficient quota error searching chunks: {e}")
+                raise
             logger.error(f"Error searching similar chunks: {e}")
             return []
     

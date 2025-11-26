@@ -31,6 +31,7 @@ from ..utils.rate_limiter import check_rate_limit, get_client_stats
 from .chunks_reranker import rerank_static_chunks
 from ..utils.slack_bot import SlackBot
 from .query_processor import processUserQuery
+from ..utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 # Configure logging
 logging.basicConfig(
@@ -306,6 +307,24 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 user_id=request.user_id
             )
         except Exception as qa_error:
+            # Check if it's an insufficient quota error
+            if is_insufficient_quota_error(qa_error):
+                logger.error(f"Insufficient quota error in processUserQuery: {qa_error}")
+                processing_time = (datetime.now() - start_time).total_seconds() * 1000
+                return QueryResponse(
+                    answer=get_quota_error_message(),
+                    sources=[],
+                    follow_up_questions=[],
+                    remaining_requests=remaining_requests,
+                    confidence=0.0,
+                    context_used=False,
+                    model_used=Config.OPENAI_MODEL,
+                    chunks_used=0,
+                    processing_time_ms=processing_time,
+                    timestamp=datetime.now().isoformat(),
+                    search_method="quota_error"
+                )
+            
             # Log the error locally
             logger.error(f"Error in processUserQuery: {qa_error}")
             
@@ -388,6 +407,28 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
         
     except Exception as e:
         logger.error(f"Error processing query: {e}")
+        
+        # Check if it's an insufficient quota error
+        if is_insufficient_quota_error(e):
+            try:
+                _, remaining_requests = check_rate_limit(request.user_id)
+            except:
+                remaining_requests = 0
+            
+            return QueryResponse(
+                answer=get_quota_error_message(),
+                sources=[],
+                follow_up_questions=[],
+                remaining_requests=remaining_requests,
+                confidence=0.0,
+                context_used=False,
+                model_used=Config.OPENAI_MODEL,
+                chunks_used=0,
+                processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                timestamp=datetime.now().isoformat(),
+                search_method="quota_error"
+            )
+        
         # Try to get remaining requests if possible, otherwise default to 0
         try:
             _, remaining_requests = check_rate_limit(request.user_id)
