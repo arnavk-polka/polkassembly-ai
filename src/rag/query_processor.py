@@ -625,7 +625,7 @@ Candidate Answer:
 {answer}
 
 Does the candidate answer directly and accurately address the user's query while respecting the conversation context?
-
+If the answer reasonably addresses the user's query, even if it's not perfect, respond "yes".
 Respond with exactly one word: "yes" or "no".
 """
     
@@ -633,7 +633,7 @@ Respond with exactly one word: "yes" or "no".
         response = qa_generator.client.chat.completions.create(
             model=os.getenv("STATIC_VALIDATION_MODEL", "gpt-4o-mini"),
             messages=[
-                {"role": "system", "content": "You are a strict validator that only replies 'yes' or 'no'."},
+                {"role": "system", "content": "You are a validator that only replies 'yes' or 'no'. Be lenient: if the answer covers the main point of the user's question and doesn't contradict it, respond 'yes'."},
                 {"role": "user", "content": validation_prompt}
             ],
             temperature=0.0,
@@ -1035,7 +1035,8 @@ async def processUserQuery(
                 else:
                     log_step("static_validator_rejected", {
                         "note": "LLM validator flagged static answer as irrelevant",
-                        "validator_passed": False
+                        "validator_passed": False,
+                        "rejected_answer": qa_result.get('answer', '')
                     })
                     qa_result = None
             
