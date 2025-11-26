@@ -26,6 +26,8 @@ class ProposalType(Enum):
     CHILD_BOUNTY = "ChildBounty"
     REFERENDUM_V2 = "ReferendumV2"
     FELLOWSHIP_REFERENDUM = "FellowshipReferendum"
+    DISCUSSION = 'Discussion'
+
 
 class OriginType(Enum):
     AUCTION_ADMIN = "AuctionAdmin"
@@ -210,7 +212,7 @@ class PolkassemblyDataFetcher:
         """Fetch all comments with pagination"""
         all_comments = []
         page = 1
-        limit = 25
+        limit = 50
 
         logger.info(f"Fetching comments for {self.network}...")
         
@@ -236,7 +238,7 @@ class PolkassemblyDataFetcher:
 
         return all_comments[:max_items]
 
-def fetch_comments_data(network: str = "polkadot", data_dir: str = None, max_items: int = 1000):
+def fetch_comments_data(data_dir: str = None, max_items: int = 1000):
     """Main function to fetch comments data for a specific network"""
     # Use the specified directory path
     if not data_dir:
@@ -245,22 +247,18 @@ def fetch_comments_data(network: str = "polkadot", data_dir: str = None, max_ite
     logger.info(f"Storing comments data in: {data_dir}")
     
     try:
-        logger.info(f"Starting comments fetch for {network}...")
-        
-        # Initialize fetcher with specified data directory
-        fetcher = PolkassemblyDataFetcher(network=network, data_dir=data_dir)
-        
-        # Fetch all comments
-        comments_data = fetcher.fetch_all_comments(max_items=max_items)
-        
-        if comments_data:
-            # Save comments data
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{network}_comments_{timestamp}.json"
-            fetcher.save_to_file(comments_data, filename)
-            logger.info(f"Completed comments fetch for {network}. Total comments: {len(comments_data)}")
-        else:
-            logger.warning(f"No comments data fetched for {network}")
+        # add a loop to fetch all comments for all networks
+        for network in SupportedNetworks:
+            logger.info(f"Starting comments fetch for {network.value}...")
+            fetcher = PolkassemblyDataFetcher(network=network.value, data_dir=data_dir)
+            comments_data = fetcher.fetch_all_comments(max_items=max_items)
+            if comments_data:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{network.value}_comments_{timestamp}.json"
+                fetcher.save_to_file(comments_data, filename)
+                logger.info(f"Completed comments fetch for {network.value}. Total comments: {len(comments_data)}")
+            else:
+                logger.warning(f"No comments data fetched for {network.value}")
             
     except Exception as e:
         logger.error(f"Error processing comments for network {network}: {e}")
@@ -290,9 +288,40 @@ def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
             logger.error(f"Error processing network {network.value}: {e}")
             continue
 
+def fetch_off_chain_posts_data(max_items_per_type: int = 1000, data_dir: str = None):
+    """Main function to fetch onchain data for all supported networks"""
+    # Use the specified directory path
+    if not data_dir:
+        data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
+    
+    logger.info(f"Storing onchain data in: {data_dir}")
+    
+    for network in SupportedNetworks:
+        logger.info(f"network is {network}")
+        try:
+            logger.info(f"Starting data fetch for {network.value}...")
+            fetcher = PolkassemblyDataFetcher(network=network.value, data_dir=data_dir)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            data = fetcher.fetch_all_posts_for_type(
+                            proposal_type=ProposalType.DISCUSSION,
+                            max_items=max_items_per_type
+                        )
+            
+            if data:
+                filename = f"{network.value}_{ProposalType.DISCUSSION.value}_{timestamp}.json"
+                fetcher.save_to_file(data, filename)
+                            
+            logger.info(f"Completed data fetch for {network.value}")
+            
+        except Exception as e:
+            logger.error(f"Error processing network {network.value}: {e}")
+            continue
+
 if __name__ == "__main__":
     # Fetch data for all networks and proposal types
     print(str(os.getenv("BASE_PATH")) + "/data/onchain_data")
-    fetch_onchain_data(max_items_per_type=10)  # Adjust as needed
+    fetch_onchain_data(max_items_per_type=10000)  # Adjust as needed
+    
     # Example: Fetch all comments for polkadot
-    fetch_comments_data(network="polkadot", max_items=1000)
+    fetch_comments_data(max_items=10000)
+    fetch_off_chain_posts_data(max_items_per_type=10000)
