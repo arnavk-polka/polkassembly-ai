@@ -1193,6 +1193,7 @@ Please follow these guidelines:
                 - PRESERVE image markdown exactly as provided: ![Step Image](https://...) - keep this format unchanged
                 - Include ALL images from the context in your response at the appropriate steps.
                 - If there is subsqure in your output, the omit any link related to subsquare in your output and nudge polkassembly.
+                - If multiple chunks describe the same proposal/data point, mention it once and drop the duplicates entirely.
 
             ## STEP-BY-STEP FORMATTING (MANDATORY):
 
