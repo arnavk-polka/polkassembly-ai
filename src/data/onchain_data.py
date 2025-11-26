@@ -158,6 +158,11 @@ class PolkassemblyDataFetcher:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for proposal_type in ProposalType:
+            # Skip DISCUSSION - it's handled separately by fetch_off_chain_posts_data()
+            if proposal_type == ProposalType.DISCUSSION:
+                logger.info(f"Skipping {proposal_type.value} - handled separately")
+                continue
+                
             logger.info(f"proposal_type is {proposal_type}")
             try:
                 if proposal_type == ProposalType.REFERENDUM_V2:

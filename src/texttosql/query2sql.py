@@ -1504,7 +1504,7 @@ Conversation History:
 
 You must return ONLY valid JSON with these exact keys:
 {{
-    "entity_type": "referenda" | "treasury_proposal" | "bounty" | "voter" | "delegate" | "unknown",
+    "entity_type": "referenda" | "treasury_proposal" | "bounty" | "discussion" | "voter" | "delegate" | "unknown",
     "network": "polkadot" | "kusama" | "both" | "unspecified",
     "id": number or null,
     "time_range": "last_30_days" | "last_90_days" | "all_time" | "unspecified",
@@ -1513,7 +1513,8 @@ You must return ONLY valid JSON with these exact keys:
 }}
 
 Rules:
-- entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, voters, delegates, or unknown)
+- entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, discussions, voters, delegates, or unknown)
+- If the query mentions "discussion" or asks about a discussion post, use entity_type: "discussion"
 - network: Extract network preference (polkadot, kusama, both, or unspecified if not mentioned)
 - id: Extract specific proposal/referendum ID if mentioned (number or null)
 - time_range: Extract time filter if mentioned (last_30_days, last_90_days, all_time, or unspecified)
@@ -1568,7 +1569,7 @@ Return ONLY the JSON object, no other text."""
                     }
                     
                     # Validate enum values
-                    valid_entity_types = ["referenda", "treasury_proposal", "bounty", "voter", "delegate", "unknown"]
+                    valid_entity_types = ["referenda", "treasury_proposal", "bounty", "discussion", "voter", "delegate", "unknown"]
                     valid_networks = ["polkadot", "kusama", "both", "unspecified"]
                     valid_time_ranges = ["last_30_days", "last_90_days", "all_time", "unspecified"]
                     valid_metrics = ["count", "list", "sum", "avg", "details"]
@@ -1799,7 +1800,12 @@ DATABASE SCHEMA:
 
             DATA FILTERING RULES:
             5. Network filtering: Use 'source_network' column (values: 'polkadot', 'kusama')
-            6. Proposal types: Use 'source_proposal_type' column  
+            6. Proposal types: Use 'source_proposal_type' column
+            6a. CRITICAL: Map intent entity_type to source_proposal_type:
+                - entity_type "referenda" -> source_proposal_type = 'ReferendumV2'
+                - entity_type "treasury_proposal" -> source_proposal_type = 'TreasuryProposal'
+                - entity_type "bounty" -> source_proposal_type = 'Bounty'
+                - entity_type "discussion" -> source_proposal_type = 'Discussion'
             7. Proposal IDs: Use 'index' column
             8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
             9. Text search: Use ILIKE for case-insensitive matching with % wildcards
@@ -1913,7 +1919,8 @@ DATABASE SCHEMA:
             - ALTERNATIVE: Use NULLS LAST to push NULL values to bottom: ORDER BY "createdat" DESC NULLS LAST
             
             Very very Important Rule:
-            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum and Bounty.
+            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum, Bounty, or Discussion.
+            - Valid proposal types: 'ReferendumV2', 'TreasuryProposal', 'Bounty', 'ChildBounty', 'FellowshipReferendum', 'Discussion', 'Tip', 'DemocracyProposal', 'CouncilMotion', 'Referendum', 'TechCommitteeProposal'
             
             Natural Language Query: {natural_query}
             
@@ -2034,7 +2041,13 @@ DATABASE SCHEMA:
 
             DATA FILTERING RULES:
             5. Network filtering: Use 'source_network' column (values: 'polkadot', 'kusama')
-            6. Proposal types: Use 'source_proposal_type' column  
+            6. Proposal types: Use 'source_proposal_type' column
+            6a. CRITICAL: Map intent entity_type to source_proposal_type:
+                - entity_type "referenda" -> source_proposal_type = 'ReferendumV2'
+                - entity_type "treasury_proposal" -> source_proposal_type = 'TreasuryProposal'
+                - entity_type "bounty" -> source_proposal_type = 'Bounty'
+                - entity_type "discussion" -> source_proposal_type = 'Discussion'
+                - If query mentions "discussion" or "discussion post" -> source_proposal_type = 'Discussion'
             7. Proposal IDs: Use 'index' column
             8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
             9. Text search: Use ILIKE for case-insensitive matching with % wildcards
@@ -2192,7 +2205,9 @@ DATABASE SCHEMA:
             - Columns with NULL/NaN values: ['publicuser_profiledetails_publicsociallinks_0_platform', 'history_1_title', 'linkedpost_indexorhash', 'tags_1_network', 'index', 'onchaininfo_votemetrics', 'hash', 'content', 'onchaininfo_beneficiaries_0_assetid', 'publicuser_addresses_3', 'userid', 'history_0_title', 'onchaininfo_prepareperiodendsat', 'history_2_createdat_seconds', 'tags_0_network', 'publicuser_addresses_2', 'topic', 'onchaininfo_proposer', 'history_2_content', 'poll', 'publicuser_profiledetails_title', 'publicuser_profiledetails_publicsociallinks_0_url', 'onchaininfo_index', 'history_1_createdat_nanoseconds', 'onchaininfo_beneficiaries_0_amount', 'history_1_content', 'onchaininfo_votemetrics_bareayes_value', 'publicuser_profilescore', 'onchaininfo_decisionperiodendsat', 'history_0_content', 'tags_0_lastusedat', 'tags_2_lastusedat', 'tags_2_value', 'id', 'tags_1_value', 'history_0_createdat_seconds', 'updatedat', 'onchaininfo_origin', 'publicuser_profiledetails_coverimage', 'onchaininfo_votemetrics_nay_count', 'onchaininfo_votemetrics_aye_count', 'createdat', 'history_2_title', 'onchaininfo_votemetrics_aye_value', 'publicuser_profiledetails_bio', 'history_0_createdat_nanoseconds', 'publicuser_profiledetails_image', 'linkedpost_proposaltype', 'onchaininfo_beneficiaries_0_address', 'publicuser_addresses_0', 'publicuser_rank', 'tags_1_lastusedat', 'tags_0_value', 'publicuser_addresses_1', 'onchaininfo_votemetrics_nay_value', 'onchaininfo_votemetrics_support_value', 'onchaininfo_hash', 'onchaininfo_reward', 'publicuser_id', 'onchaininfo_description', 'publicuser_addresses_4', 'history_1_createdat_seconds', 'onchaininfo_curator', 'history_2_createdat_nanoseconds', 'publicuser_createdat', 'publicuser_username', 'tags_2_network']
 
             Very very Important Rule:
-            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum and Bounty.
+            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum, Bounty, or Discussion.
+            - If the query mentions "discussion" or asks about discussion posts, use source_proposal_type = 'Discussion' instead of 'ReferendumV2'.
+            - Valid proposal types: 'ReferendumV2', 'TreasuryProposal', 'Bounty', 'ChildBounty', 'FellowshipReferendum', 'Discussion', 'Tip', 'DemocracyProposal', 'CouncilMotion', 'Referendum', 'TechCommitteeProposal'
             
             Natural Language Query: {natural_query}
             
