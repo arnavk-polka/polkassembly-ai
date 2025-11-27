@@ -31,11 +31,17 @@ class SemanticReranker:
             scores = scores.unsqueeze(0)
         
         scored_chunks = [
-            {**chunk, "rerank_score": float(score)}
+            {**chunk, "semantic_score": float(score.item()) if hasattr(score, "item") else float(score)}
             for chunk, score in zip(chunks, scores)
         ]
         
-        scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
+        scored_chunks.sort(key=lambda x: x["semantic_score"], reverse=True)
         
-        return scored_chunks[:top_k]
+        return scored_chunks
+
+
+def get_reranker():
+    """Get the global reranker instance"""
+    from .query_processor import _get_reranker
+    return _get_reranker()
 
