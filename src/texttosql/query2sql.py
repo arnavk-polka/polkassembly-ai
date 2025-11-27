@@ -1795,7 +1795,11 @@ DATABASE SCHEMA:
             1. Use ONLY existing columns from the schema above
             2. Table name: {self.table_name}
             3. Use proper PostgreSQL syntax with double quotes for column names
-            4. Apply appropriate LIMIT clauses (typically 10 for lists, no limit for counts)
+            4. Apply appropriate LIMIT clauses:
+               - Use LIMIT 1 for SINGULAR queries (e.g., "latest discussion", "the discussion", "a discussion", "one discussion")
+               - Use LIMIT 10 for PLURAL queries (e.g., "latest discussions", "some discussions", "discussions")
+               - No LIMIT for count/aggregate queries
+               - CRITICAL: If the query asks for "latest [entity]" (singular) or "the [entity]" or "a [entity]", use LIMIT 1
             5. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values
 
             DATA FILTERING RULES:
@@ -2036,7 +2040,11 @@ DATABASE SCHEMA:
             1. Use ONLY existing columns from the schema above
             2. Table name: {self.table_name}
             3. Use proper PostgreSQL syntax with double quotes for column names
-            4. Apply appropriate LIMIT clauses (typically 10 for lists, no limit for counts)
+            4. Apply appropriate LIMIT clauses:
+               - Use LIMIT 1 for SINGULAR queries (e.g., "latest discussion", "the discussion", "a discussion", "one discussion")
+               - Use LIMIT 10 for PLURAL queries (e.g., "latest discussions", "some discussions", "discussions")
+               - No LIMIT for count/aggregate queries
+               - CRITICAL: If the query asks for "latest [entity]" (singular) or "the [entity]" or "a [entity]", use LIMIT 1
             5. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values
 
             DATA FILTERING RULES:
@@ -2164,6 +2172,7 @@ DATABASE SCHEMA:
             Single Query Examples:
              - "http://polkadot.polkassembly.io/referenda/1781" or "polkadot.polkassembly.io/referenda/1781" -> SELECT "index", "title", "onchaininfo_status", "createdat", "content", "source_network", "source_proposal_type", "onchaininfo_proposer", "onchaininfo_reward", "onchaininfo_beneficiaries_0_amount", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "index" = 1781 AND "source_network" = 'polkadot' AND "index" IS NOT NULL AND "source_network" IS NOT NULL;
              - "Show me recent proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
+             - "Tell me about the latest discussion" -> SELECT "title", "index", "source_network", "createdat", "content" FROM {self.table_name} WHERE "source_proposal_type" = 'Discussion' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 1;
              - "Find Kusama proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_network" = 'kusama' AND "source_network" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
              - "What treasury proposals exist?" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_proposal_type" ILIKE '%treasury%' AND "source_proposal_type" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
              - "Tell me about clarys proposal" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("content" ILIKE '%clarys%' AND "content" IS NOT NULL) OR ("title" ILIKE '%clarys%' AND "title" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;

@@ -10,7 +10,7 @@ import numpy as np
 from .gemini import GeminiClient
 import time
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .mem0_memory import get_memory_manager, add_user_query, add_assistant_response
 # Content guardrails now handled by Bedrock guardrails in the API endpoint
@@ -392,8 +392,18 @@ class QAGenerator:
                     "content": content
                 })
             
-            # Improved prompt with better structure and examples
-            analysis_prompt = f"""You are a query context analyzer. Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
+            # Include current date to resolve relative time references
+            current_date = datetime.utcnow()
+            current_date_str = current_date.strftime("%Y-%m-%d")
+            current_month_str = current_date.strftime("%B %Y")
+            last_month = (current_date.replace(day=1) - timedelta(days=1))
+            last_month_str = last_month.strftime("%B %Y")
+            yesterday_str = (current_date - timedelta(days=1)).strftime("%Y-%m-%d")
+            last_year_str = (current_date.replace(month=1, day=1) - timedelta(days=1)).strftime("%Y")
+            
+            # Improved prompt with better structure and examples (with current date context)
+            analysis_prompt = f"""You are a query context analyzer. Today's date is {current_date_str} (UTC).
+Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
 
 CONVERSATION HISTORY:
 {self._format_conversation_history(serializable_history)}
@@ -414,6 +424,13 @@ INSTRUCTIONS:
 4. Keep technical terms and column names consistent with previous queries
 5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
 6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
+7. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
+   - "this month" → "{current_month_str}"
+   - "last month" → "{last_month_str}"
+   - "today" → "{current_date_str}"
+   - "yesterday" → "{yesterday_str}"
+   - "last year" → "{last_year_str}"
+   - Never guess dates beyond what can be derived from today's date.
 
 EXAMPLES:
 
@@ -1246,6 +1263,10 @@ Please follow these guidelines:
         if memory_context:
             prompt_parts.append(f"Memory Context:\n{memory_context}")
         
+        # Add current date context to handle relative time references
+        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+        prompt_parts.append(f"Current Date (UTC): {current_date}")
+
         # Add document context
         if context:
             prompt_parts.append(f"Context Information:\n{context}")

@@ -636,7 +636,14 @@ Candidate Answer:
 {answer}
 
 Does the candidate answer directly and accurately address the user's query while respecting the conversation context?
+
+CRITICAL: Reject answers that indicate no information was found, such as:
+- "I don't have information about"
+- Any answer that explicitly states it cannot answer the question
+
 If the answer reasonably addresses the user's query, even if it's not perfect, respond "yes".
+If the answer says it doesn't have information or cannot answer, respond "no".
+
 Respond with exactly one word: "yes" or "no".
 """
     
@@ -644,7 +651,7 @@ Respond with exactly one word: "yes" or "no".
         response = qa_generator.client.chat.completions.create(
             model=os.getenv("STATIC_VALIDATION_MODEL", "gpt-4o-mini"),
             messages=[
-                {"role": "system", "content": "You are a validator that only replies 'yes' or 'no'. Be lenient: if the answer covers the main point of the user's question and doesn't contradict it, respond 'yes'."},
+                {"role": "system", "content": "You are a validator that only replies 'yes' or 'no'. Reject answers that say they don't have information. Accept answers that provide actual information, even if incomplete."},
                 {"role": "user", "content": validation_prompt}
             ],
             temperature=0.0,
