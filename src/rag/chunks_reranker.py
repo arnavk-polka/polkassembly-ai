@@ -4,11 +4,28 @@ Chunks Reranker - Logic to prioritize chunks based on content quality and image 
 """
 
 import logging
+import re
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def keyword_filter(query, chunks):
+    query_words = [w.lower() for w in re.findall(r"\w+", query) if len(w) > 3]
+    filtered = []
+
+    for chunk in chunks:
+        text = chunk.get("content", "").lower()
+        match_strength = sum(1 for w in query_words if w in text)
+        chunk["keyword_score"] = match_strength
+        filtered.append(chunk)
+
+    # keep only chunks with ANY keyword overlap
+    strong = [c for c in filtered if c["keyword_score"] > 0]
+
+    # if none match, fall back to unfiltered
+    return strong if strong else filtered
+
+def rerank_static_chunks(query: str, static_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Rerank static chunks with priority order:
     1. Polkassembly chunks (highest priority)
@@ -16,18 +33,21 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
     3. All chunks (if no qualifying chunks)
     
     Args:
+        query: Search query string
         static_chunks: List of static chunk dictionaries
     
     Returns:
         List of reranked/filtered chunks with Polkassembly priority, then S3 image priority
     """
-    if not static_chunks:
-        return static_chunks
+    chunks = keyword_filter(query, static_chunks)
+    
+    if not chunks:
+        return chunks
     
     s3_bucket_url = "https://polkassembly-ai.s3.us-east-1.amazonaws.com"
     
     # Get the highest similarity score from all chunks
-    all_scores = [chunk.get('similarity_score', 0) for chunk in static_chunks]
+    all_scores = [chunk.get('similarity_score', 0) for chunk in chunks]
     highest_score = max(all_scores) if all_scores else 0
     
     logger.info(f"Highest similarity score among all chunks: {highest_score:.3f}")
@@ -36,8 +56,8 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
     chunks_with_polkassembly = []
     polkassembly_docs_chunks = []
     
-    logger.info(f"Processing {len(static_chunks)} chunks for reranking")
-    for chunk in static_chunks:
+    logger.info(f"Processing {len(chunks)} chunks for reranking")
+    for chunk in chunks:
         content = chunk.get('content', '').lower()
         metadata = chunk.get('metadata', {})
         title = metadata.get('title', '').lower() if metadata.get('title') else ''
@@ -70,7 +90,7 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
             chunk_title = metadata.get('title', 'Unknown')
             logger.info(f"Found chunk with Polkassembly mention: '{chunk_title}' (score: {similarity_score:.3f})")
     
-    logger.info(f"Found {len(polkassembly_docs_chunks)} Polkassembly docs chunks out of {len(static_chunks)} total chunks")
+    logger.info(f"Found {len(polkassembly_docs_chunks)} Polkassembly docs chunks out of {len(chunks)} total chunks")
     
     # If Polkassembly docs chunks found, ALWAYS prefer them regardless of similarity scores
     # Only filter out chunks with very low similarity (< 0.4) to avoid completely irrelevant results
@@ -90,7 +110,7 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
                 logger.info(f"Polkassembly docs chunk rejected (too low similarity): '{title}' (score: {chunk_score:.3f})")
         
         if qualifying_polkassembly_docs:
-            logger.info(f"Prioritizing {len(qualifying_polkassembly_docs)} Polkassembly docs chunks (always preferred if available) out of {len(static_chunks)} total chunks")
+            logger.info(f"Prioritizing {len(qualifying_polkassembly_docs)} Polkassembly docs chunks (always preferred if available) out of {len(chunks)} total chunks")
             return qualifying_polkassembly_docs
     
     # If Polkassembly chunks found (but not docs), check if any qualify (within 5 points of highest score)
@@ -111,13 +131,13 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
         
         # If we have qualifying Polkassembly chunks, return only those (highest priority)
         if qualifying_polkassembly_chunks:
-            logger.info(f"Prioritizing {len(qualifying_polkassembly_chunks)} qualifying Polkassembly chunks out of {len(static_chunks)} total chunks")
+            logger.info(f"Prioritizing {len(qualifying_polkassembly_chunks)} qualifying Polkassembly chunks out of {len(chunks)} total chunks")
             return qualifying_polkassembly_chunks
     
     # PRIORITY 2: If no qualifying Polkassembly chunks, check for S3 image chunks
     chunks_with_images = []
     
-    for chunk in static_chunks:
+    for chunk in chunks:
         content = chunk.get('content', '')
         if s3_bucket_url in content:
             chunks_with_images.append(chunk)
@@ -143,9 +163,9 @@ def rerank_static_chunks(static_chunks: List[Dict[str, Any]]) -> List[Dict[str, 
         
         # If we have qualifying image chunks, return only those
         if qualifying_image_chunks:
-            logger.info(f"Prioritizing {len(qualifying_image_chunks)} qualifying image chunks out of {len(static_chunks)} total chunks")
+            logger.info(f"Prioritizing {len(qualifying_image_chunks)} qualifying image chunks out of {len(chunks)} total chunks")
             return qualifying_image_chunks
     
     # PRIORITY 3: If no qualifying chunks, return all chunks
-    logger.info(f"No qualifying Polkassembly or S3 image chunks found. Returning all {len(static_chunks)} chunks")
-    return static_chunks
+    logger.info(f"No qualifying Polkassembly or S3 image chunks found. Returning all {len(chunks)} chunks")
+    return chunks

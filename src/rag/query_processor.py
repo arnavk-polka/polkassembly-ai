@@ -16,6 +16,17 @@ from .clarification import generate_clarification_question
 from .internet_fallback import generate_internet_search_response
 from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
+_reranker = None
+
+def set_reranker(reranker):
+    """Set the global reranker instance (called at startup)"""
+    global _reranker
+    _reranker = reranker
+
+def _get_reranker():
+    """Get the global reranker instance"""
+    return _reranker
+
 logger = logging.getLogger(__name__)
 
 
@@ -998,8 +1009,16 @@ async def processUserQuery(
                 n_results=initial_chunks_to_retrieve
             )
             from .chunks_reranker import rerank_static_chunks
-            static_chunks = rerank_static_chunks(static_chunks)
-            # Limit to max_chunks after reranking
+            # 1. Keyword filter + metadata priority happens inside reranker
+            # 2. Now semantic reranking on top of filtered chunks
+            static_chunks = rerank_static_chunks(query=analyzed_query, static_chunks=static_chunks)
+            
+            # Semantic reranker for final ranking
+            reranker = _get_reranker()
+            if reranker:
+                static_chunks = reranker.rerank(analyzed_query, static_chunks, top_k=max_chunks)
+            
+            # Finally ensure we still limit to max_chunks
             static_chunks = static_chunks[:max_chunks]
             log_step("static_retrieval_complete", {
                 "chunks_count": len(static_chunks)
@@ -1315,8 +1334,16 @@ async def processUserQuery(
                 n_results=initial_chunks_to_retrieve
             )
             from .chunks_reranker import rerank_static_chunks
-            static_chunks = rerank_static_chunks(static_chunks)
-            # Limit to max_chunks after reranking
+            # 1. Keyword filter + metadata priority happens inside reranker
+            # 2. Now semantic reranking on top of filtered chunks
+            static_chunks = rerank_static_chunks(query=analyzed_query, static_chunks=static_chunks)
+            
+            # Semantic reranker for final ranking
+            reranker = _get_reranker()
+            if reranker:
+                static_chunks = reranker.rerank(analyzed_query, static_chunks, top_k=max_chunks)
+            
+            # Finally ensure we still limit to max_chunks
             static_chunks = static_chunks[:max_chunks]
             log_step("hybrid_static_retrieval_complete", {"chunks_count": len(static_chunks)})
             

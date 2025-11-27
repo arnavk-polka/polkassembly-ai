@@ -5,6 +5,8 @@ tiktoken==0.7.0
 numpy==1.26.0
 pandas==2.1.1
 psycopg2-binary==2.9.9
+torch>=2.0.0
+transformers>=4.30.0
 
 # Vector Database
 chromadb==0.4.18

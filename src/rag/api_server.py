@@ -30,7 +30,7 @@ from ..guardrail.guardrail import check_with_guardrail_async
 from ..utils.rate_limiter import check_rate_limit, get_client_stats
 from .chunks_reranker import rerank_static_chunks
 from ..utils.slack_bot import SlackBot
-from .query_processor import processUserQuery
+from .query_processor import processUserQuery, set_reranker
 from ..utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 # Configure logging
@@ -112,6 +112,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to initialize Slack bot: {e}. Error reporting to Slack will be disabled.")
             slack_bot = None
+        
+        # Initialize semantic reranker
+        try:
+            logger.info("Initializing semantic reranker...")
+            from .semantic_reranker import SemanticReranker
+            reranker = SemanticReranker()
+            set_reranker(reranker)
+            logger.info("Semantic reranker initialized successfully")
+        except ImportError as e:
+            logger.warning(f"Semantic reranker not available: {e}. Reranking will be skipped.")
+        except Exception as e:
+            logger.warning(f"Failed to initialize semantic reranker: {e}. Reranking will be skipped.")
         
         logger.info("API startup completed successfully")
         

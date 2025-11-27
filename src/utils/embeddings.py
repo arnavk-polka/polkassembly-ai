@@ -116,7 +116,11 @@ class EmbeddingManager:
                 # Add empty embeddings for failed batch
                 embeddings.extend([[0.0] * 1536] * len(batch))  # ada-002 has 1536 dimensions
         
-        return embeddings
+        def _normalize(vec):
+            normalized = vec / np.linalg.norm(vec)
+            return normalized.tolist() if isinstance(normalized, np.ndarray) else normalized
+        
+        return [_normalize(e) for e in embeddings]
     
     def add_chunks_to_collection(self, chunks: List[Dict[str, Any]]) -> bool:
         """
@@ -199,6 +203,10 @@ class EmbeddingManager:
 
             # Generate embedding for the query
             query_embedding = self.generate_embeddings([query])[0]
+            if isinstance(query_embedding, list):
+                query_embedding = np.array(query_embedding)
+            query_embedding = query_embedding / np.linalg.norm(query_embedding)
+            query_embedding = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else query_embedding
             
             results = []
             
@@ -215,7 +223,7 @@ class EmbeddingManager:
                         result = {
                             'content': static_results['documents'][0][i],
                             'metadata': static_results['metadatas'][0][i],
-                            'similarity_score': 1.0 - static_results['distances'][0][i],
+                            'similarity_score': 1 - (static_results['distances'][0][i] / 2),
                             'source': 'static'
                         }
                         results.append(result)
@@ -234,7 +242,7 @@ class EmbeddingManager:
                         result = {
                             'content': dynamic_results['documents'][0][i],
                             'metadata': dynamic_results['metadatas'][0][i],
-                            'similarity_score': 1.0 - dynamic_results['distances'][0][i],
+                            'similarity_score': 1 - (dynamic_results['distances'][0][i] / 2),
                             'source': 'dynamic'
                         }
                         results.append(result)
