@@ -55,74 +55,123 @@ def initialize_slack_bot() -> Optional[SlackBot]:
 
 def send_startup_notification(bot: Optional[SlackBot]) -> None:
     """Send startup notification to Slack, ensuring only one notification is sent even with multiple workers"""
-    if not bot or not Config.ENABLE_SLACK_NOTIFICATIONS:
+    get_logger().info(f"send_startup_notification called: ENABLE_SLACK_NOTIFICATIONS={Config.ENABLE_SLACK_NOTIFICATIONS}, bot={bot is not None}")
+    
+    if not Config.ENABLE_SLACK_NOTIFICATIONS:
+        get_logger().info("Slack notifications disabled, skipping startup notification")
+        return
+    
+    if not bot:
+        get_logger().warning("Slack bot not initialized, cannot send startup notification")
         return
     
     global startup_notification_sent
     if startup_notification_sent:
+        get_logger().info("Startup notification already sent in this process, skipping")
         return
     
     import time
-    should_send = False
     lock_fd = None
     
     try:
-        # Check if notification was sent recently (within last 30 seconds)
+        # Clean up old lock files (older than 30 seconds)
         if STARTUP_LOCK_FILE.exists():
             try:
                 mtime = STARTUP_LOCK_FILE.stat().st_mtime
-                if time.time() - mtime < 30:
-                    get_logger().info("Startup notification was sent recently, skipping to avoid duplicates")
-                    should_send = False
+                age_seconds = time.time() - mtime
+                if age_seconds < 30:
+                    get_logger().info(f"Startup notification was sent {age_seconds:.1f} seconds ago, skipping to avoid duplicates")
+                    return
                 else:
-                    should_send = True
-            except:
-                should_send = True
-        else:
-            should_send = True
+                    # Lock file is old, remove it
+                    get_logger().info(f"Removing stale lock file (age: {age_seconds:.1f} seconds)")
+                    try:
+                        os.unlink(STARTUP_LOCK_FILE)
+                    except Exception as e:
+                        get_logger().warning(f"Failed to remove stale lock file: {e}")
+            except Exception as e:
+                get_logger().warning(f"Error checking lock file timestamp: {e}, removing and proceeding")
+                try:
+                    if STARTUP_LOCK_FILE.exists():
+                        os.unlink(STARTUP_LOCK_FILE)
+                except Exception:
+                    pass
         
-        if should_send:
-            # Try to acquire exclusive lock
+        # Try to acquire exclusive lock
+        try:
             lock_fd = os.open(STARTUP_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            get_logger().info("Acquired lock for startup notification")
+            
+            # Send notification
+            get_logger().info("Sending startup notification to Slack...")
+            bot.post_to_slack({
+                "event": "API Server Started",
+                "status": "RUNNING 🚀",
+                "timestamp": datetime.now().isoformat(),
+                "process_id": os.getpid(),
+            })
+            startup_notification_sent = True
+            get_logger().info("Startup notification sent to Slack successfully")
+            
+            # Update lock file timestamp
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.write(lock_fd, str(time.time()).encode())
+                os.fsync(lock_fd)
+            except Exception as e:
+                get_logger().warning(f"Failed to update lock file timestamp: {e}")
                 
-                # Double-check timestamp after acquiring lock
-                if STARTUP_LOCK_FILE.exists():
-                    try:
-                        mtime = STARTUP_LOCK_FILE.stat().st_mtime
-                        if time.time() - mtime < 30:
-                            get_logger().info("Another process sent notification while we were waiting, skipping")
-                            should_send = False
-                    except:
-                        pass
+        except BlockingIOError:
+            get_logger().info("Startup notification already being sent by another process, skipping")
+            return
+        except Exception as e:
+            get_logger().error(f"Error in lock mechanism: {e}, attempting fallback")
+            # Don't return here, fall through to fallback
+        finally:
+            if lock_fd is not None:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                    os.close(lock_fd)
+                except Exception as e:
+                    get_logger().warning(f"Error releasing lock: {e}")
+        
+        # If we got here and notification wasn't sent, try fallback
+        if not startup_notification_sent:
+            get_logger().info("Attempting to send startup notification without lock (fallback)...")
+            try:
+                bot.post_to_slack({
+                    "event": "API Server Started",
+                    "status": "RUNNING 🚀",
+                    "timestamp": datetime.now().isoformat(),
+                    "process_id": os.getpid(),
+                    "note": "Lock mechanism had issues, notification may be duplicated"
+                })
+                startup_notification_sent = True
+                get_logger().info("Startup notification sent (fallback)")
+            except Exception as fallback_error:
+                get_logger().error(f"Failed to send startup notification even with fallback: {fallback_error}")
+                import traceback
+                get_logger().error(traceback.format_exc())
                 
-                if should_send:
-                    # Send notification
-                    bot.post_to_slack({
-                        "event": "API Server Started",
-                        "status": "RUNNING 🚀",
-                        "timestamp": datetime.now().isoformat(),
-                        "process_id": os.getpid(),
-                    })
-                    startup_notification_sent = True
-                    get_logger().info("Startup notification sent to Slack")
-                    
-                    # Update lock file timestamp
-                    os.write(lock_fd, str(time.time()).encode())
-                    os.fsync(lock_fd)
-                    
-            except BlockingIOError:
-                get_logger().info("Startup notification already being sent by another process, skipping")
-            finally:
-                if lock_fd is not None:
-                    try:
-                        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        os.close(lock_fd)
-                    except:
-                        pass
     except Exception as lock_error:
-        get_logger().warning(f"Failed to handle startup notification lock: {lock_error}")
+        get_logger().error(f"Failed to handle startup notification: {lock_error}")
+        import traceback
+        get_logger().error(traceback.format_exc())
+        # Try to send anyway if lock mechanism fails
+        if not startup_notification_sent:
+            try:
+                get_logger().info("Attempting to send startup notification without lock (exception fallback)...")
+                bot.post_to_slack({
+                    "event": "API Server Started",
+                    "status": "RUNNING 🚀",
+                    "timestamp": datetime.now().isoformat(),
+                    "process_id": os.getpid(),
+                    "note": "Lock mechanism failed, notification may be duplicated"
+                })
+                startup_notification_sent = True
+                get_logger().info("Startup notification sent (exception fallback)")
+            except Exception as fallback_error:
+                get_logger().error(f"Failed to send startup notification even with exception fallback: {fallback_error}")
 
 
 def set_shutdown_reason(reason: str, exception: Optional[Exception] = None) -> None:
