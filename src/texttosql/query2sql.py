@@ -1905,9 +1905,10 @@ DATABASE SCHEMA:
             
             CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
             - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
-            - "onchaininfo_reward": The REWARD amount for tips/bounties (not spending amounts)
+            - "onchaininfo_reward": The REWARD amount for tips/bounties AND TreasuryProposals (treasury proposals use "onchaininfo_reward", NOT "onchaininfo_beneficiaries_0_amount")
             - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
             - For queries about tip/bounty rewards: USE "onchaininfo_reward"
+            - For TreasuryProposal queries about funds/amounts: USE "onchaininfo_reward" (treasury proposals don't have beneficiaries_0_amount populated)
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -2151,9 +2152,10 @@ DATABASE SCHEMA:
             
             CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
             - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
-            - "onchaininfo_reward": The REWARD amount for tips/bounties (not spending amounts)
+            - "onchaininfo_reward": The REWARD amount for tips/bounties AND TreasuryProposals (treasury proposals use "onchaininfo_reward", NOT "onchaininfo_beneficiaries_0_amount")
             - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
             - For queries about tip/bounty rewards: USE "onchaininfo_reward"
+            - For TreasuryProposal queries about funds/amounts: USE "onchaininfo_reward" (treasury proposals don't have beneficiaries_0_amount populated)
             - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
             - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
             
@@ -2175,6 +2177,7 @@ DATABASE SCHEMA:
              - "Tell me about the latest discussion" -> SELECT "title", "index", "source_network", "createdat", "content" FROM {self.table_name} WHERE "source_proposal_type" = 'Discussion' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 1;
              - "Find Kusama proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_network" = 'kusama' AND "source_network" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
              - "What treasury proposals exist?" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_proposal_type" ILIKE '%treasury%' AND "source_proposal_type" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
+             - "how many funds has treasury given to polkassembly till date" -> SELECT SUM(CAST("onchaininfo_reward" AS FLOAT)) AS total_amount, COUNT(*) as proposal_count FROM {self.table_name} WHERE "source_proposal_type" = 'TreasuryProposal' AND ("title" ILIKE '%polkassembly%' OR "content" ILIKE '%polkassembly%') AND "onchaininfo_reward" IS NOT NULL AND "onchaininfo_reward" != 'NaN';
              - "Tell me about clarys proposal" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("content" ILIKE '%clarys%' AND "content" IS NOT NULL) OR ("title" ILIKE '%clarys%' AND "title" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
              - "Tell me about subsquare proposal" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("content" ILIKE '%subsquare%' AND "content" IS NOT NULL) OR ("title" ILIKE '%subsquare%' AND "title" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
              - "Give me the details of the proposal with id 123456" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "index" = 123456 AND "index" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
