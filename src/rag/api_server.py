@@ -8,6 +8,8 @@ import os
 import sys
 import logging
 import re
+import signal
+import traceback
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -46,11 +48,15 @@ dynamic_embedding_manager: Optional[EmbeddingManager] = None
 qa_generator: Optional[QAGenerator] = None
 slack_bot: Optional[SlackBot] = None
 
+# Shutdown tracking
+shutdown_reason: Optional[str] = None
+shutdown_exception: Optional[Exception] = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
-    # Startup
-    global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot
+    global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot, shutdown_reason, shutdown_exception
     
     try:
         logger.info("Starting Polkadot AI Chatbot API...")
@@ -109,6 +115,12 @@ async def lifespan(app: FastAPI):
             logger.info("Initializing Slack bot for error reporting...")
             slack_bot = SlackBot()
             logger.info("Slack bot initialized successfully")
+            
+            slack_bot.post_to_slack({
+                "event": "API Server Started",
+                "status": "RUNNING 🚀",
+                "timestamp": datetime.now().isoformat(),
+            })
         except Exception as e:
             logger.warning(f"Failed to initialize Slack bot: {e}. Error reporting to Slack will be disabled.")
             slack_bot = None
@@ -128,14 +140,62 @@ async def lifespan(app: FastAPI):
         logger.info("API startup completed successfully")
         
     except Exception as e:
+        shutdown_exception = e
+        shutdown_reason = f"Startup failed: {type(e).__name__}: {str(e)}"
         logger.error(f"Failed to initialize API: {e}")
+        logger.error(traceback.format_exc())
+        
+        if slack_bot:
+            try:
+                slack_bot.post_error_to_slack(
+                    f"API Server startup failed: {str(e)}",
+                    context={
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+            except Exception as slack_error:
+                logger.error(f"Failed to send startup error to Slack: {slack_error}")
+        
         raise e
     
     # Application is now ready
-    yield
+    try:
+        yield
+    except Exception as e:
+        shutdown_exception = e
+        shutdown_reason = f"Runtime error: {type(e).__name__}: {str(e)}"
+        logger.error(f"Unhandled exception during runtime: {e}")
+        logger.error(traceback.format_exc())
     
     # Shutdown
-    logger.info("Shutting down Polkadot AI Chatbot API...")
+    if not shutdown_reason:
+        shutdown_reason = "Graceful shutdown"
+    
+    logger.info(f"Shutting down Polkadot AI Chatbot API... Reason: {shutdown_reason}")
+    
+    if slack_bot:
+        try:
+            shutdown_context = {
+                "reason": shutdown_reason,
+                "timestamp": datetime.now().isoformat(),
+            }
+            
+            if shutdown_exception:
+                shutdown_context.update({
+                    "error_type": type(shutdown_exception).__name__,
+                    "error_message": str(shutdown_exception),
+                    "traceback": traceback.format_exc(),
+                })
+            
+            slack_bot.post_to_slack({
+                "event": "API Server Shutdown",
+                "status": "SHUTDOWN 🛑",
+                **shutdown_context
+            })
+        except Exception as e:
+            logger.error(f"Failed to send shutdown notification to Slack: {e}")
 
 # Initialize FastAPI app (after lifespan function is defined)
 app = FastAPI(
@@ -593,11 +653,61 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     
+    
+    def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        
+        error_msg = f"Unhandled exception: {exc_type.__name__}: {str(exc_value)}"
+        traceback_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        
+        logger.error(f"CRITICAL: {error_msg}")
+        logger.error(traceback_str)
+        
+        if slack_bot:
+            try:
+                slack_bot.post_error_to_slack(
+                    f"API Server crashed: {error_msg}",
+                    context={
+                        "error_type": exc_type.__name__,
+                        "error_message": str(exc_value),
+                        "traceback": traceback_str,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+            except Exception as slack_error:
+                logger.error(f"Failed to send crash notification to Slack: {slack_error}")
+    
+    sys.excepthook = handle_unhandled_exception
+    
     logger.info("Starting Polkadot AI Chatbot API server...")
-    uvicorn.run(
-        app,
-        host=Config.API_HOST,
-        port=Config.API_PORT,
-        log_level="info",
-        reload=False
-    ) 
+    try:
+        uvicorn.run(
+            app,
+            host=Config.API_HOST,
+            port=Config.API_PORT,
+            log_level="info",
+            reload=False
+        )
+    except Exception as e:
+        error_msg = f"Server startup/runtime error: {type(e).__name__}: {str(e)}"
+        traceback_str = traceback.format_exc()
+        logger.error(f"CRITICAL: {error_msg}")
+        logger.error(traceback_str)
+        
+        if slack_bot:
+            try:
+                slack_bot.post_error_to_slack(
+                    f"API Server failed: {error_msg}",
+                    context={
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback_str,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+            except Exception as slack_error:
+                logger.error(f"Failed to send error notification to Slack: {slack_error}")
+        
+        sys.exit(1) 
