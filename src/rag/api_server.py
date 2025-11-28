@@ -28,10 +28,19 @@ from .config import Config
 from .auth import authenticate_request, get_auth_status
 from ..utils.embeddings import EmbeddingManager
 from ..utils.qa_generator import QAGenerator
-from ..guardrail.guardrail import check_with_guardrail_async
+from ..guardrail.guardrail import check_with_guardrail_async, generate_user_friendly_block_message
 from ..utils.rate_limiter import check_rate_limit, get_client_stats
 from .chunks_reranker import rerank_static_chunks
-from ..utils.slack_bot import SlackBot
+from .server_monitor import (
+    initialize_slack_bot,
+    send_startup_notification,
+    send_shutdown_notification,
+    send_startup_error_notification,
+    send_runtime_error_notification,
+    send_query_error_notification,
+    send_crash_notification,
+    set_shutdown_reason,
+)
 from .query_processor import processUserQuery, set_reranker
 from ..utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
@@ -46,17 +55,13 @@ logger = logging.getLogger(__name__)
 static_embedding_manager: Optional[EmbeddingManager] = None
 dynamic_embedding_manager: Optional[EmbeddingManager] = None
 qa_generator: Optional[QAGenerator] = None
-slack_bot: Optional[SlackBot] = None
-
-# Shutdown tracking
-shutdown_reason: Optional[str] = None
-shutdown_exception: Optional[Exception] = None
+slack_bot = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
-    global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot, shutdown_reason, shutdown_exception
+    global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot
     
     try:
         logger.info("Starting Polkadot AI Chatbot API...")
@@ -110,24 +115,9 @@ async def lifespan(app: FastAPI):
             enable_memory=Config.USE_MEM0 and bool(Config.MEM0_API_KEY)  # Enable memory only if USE_MEM0 is true and API key is provided
         )
         
-        # Initialize Slack bot for error reporting
-        if Config.ENABLE_SLACK_NOTIFICATIONS:
-            try:
-                logger.info("Initializing Slack bot for error reporting...")
-                slack_bot = SlackBot()
-                logger.info("Slack bot initialized successfully")
-                
-                slack_bot.post_to_slack({
-                    "event": "API Server Started",
-                    "status": "RUNNING 🚀",
-                    "timestamp": datetime.now().isoformat(),
-                })
-            except Exception as e:
-                logger.warning(f"Failed to initialize Slack bot: {e}. Error reporting to Slack will be disabled.")
-                slack_bot = None
-        else:
-            logger.info("Slack notifications disabled (ENABLE_SLACK_NOTIFICATIONS=false)")
-            slack_bot = None
+        # Initialize Slack bot and send startup notification
+        slack_bot = initialize_slack_bot()
+        send_startup_notification(slack_bot)
         
         # Initialize semantic reranker
         try:
@@ -144,62 +134,22 @@ async def lifespan(app: FastAPI):
         logger.info("API startup completed successfully")
         
     except Exception as e:
-        shutdown_exception = e
-        shutdown_reason = f"Startup failed: {type(e).__name__}: {str(e)}"
         logger.error(f"Failed to initialize API: {e}")
         logger.error(traceback.format_exc())
-        
-        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
-            try:
-                slack_bot.post_error_to_slack(
-                    f"API Server startup failed: {str(e)}",
-                    context={
-                        "error_type": type(e).__name__,
-                        "traceback": traceback.format_exc(),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-            except Exception as slack_error:
-                logger.error(f"Failed to send startup error to Slack: {slack_error}")
-        
+        set_shutdown_reason(f"Startup failed: {type(e).__name__}: {str(e)}", e)
+        send_startup_error_notification(slack_bot, e)
         raise e
     
     # Application is now ready
     try:
         yield
     except Exception as e:
-        shutdown_exception = e
-        shutdown_reason = f"Runtime error: {type(e).__name__}: {str(e)}"
         logger.error(f"Unhandled exception during runtime: {e}")
         logger.error(traceback.format_exc())
+        set_shutdown_reason(f"Runtime error: {type(e).__name__}: {str(e)}", e)
     
     # Shutdown
-    if not shutdown_reason:
-        shutdown_reason = "Graceful shutdown"
-    
-    logger.info(f"Shutting down Polkadot AI Chatbot API... Reason: {shutdown_reason}")
-    
-    if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
-        try:
-            shutdown_context = {
-                "reason": shutdown_reason,
-                "timestamp": datetime.now().isoformat(),
-            }
-            
-            if shutdown_exception:
-                shutdown_context.update({
-                    "error_type": type(shutdown_exception).__name__,
-                    "error_message": str(shutdown_exception),
-                    "traceback": traceback.format_exc(),
-                })
-            
-            slack_bot.post_to_slack({
-                "event": "API Server Shutdown",
-                "status": "SHUTDOWN 🛑",
-                **shutdown_context
-            })
-        except Exception as e:
-            logger.error(f"Failed to send shutdown notification to Slack: {e}")
+    send_shutdown_notification(slack_bot)
 
 # Initialize FastAPI app (after lifespan function is defined)
 app = FastAPI(
@@ -326,9 +276,20 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
         guardrail_result = await check_with_guardrail_async(request.question)
         
         if guardrail_result["status"] == "blocked":
-            logger.warning(f"Query blocked by guardrail for user {request.user_id} from IP {request.client_ip}: {guardrail_result['reason']}")
+            violation_details = guardrail_result.get('violation_details', {})
+            reason = guardrail_result.get('reason', 'Content policy violation')
+            logger.warning(f"Query blocked by guardrail for user {request.user_id} from IP {request.client_ip}: {reason}")
+            
+            # Generate natural language explanation using GPT-3.5-turbo
+            try:
+                answer = await generate_user_friendly_block_message(violation_details, request.question)
+            except Exception as e:
+                logger.error(f"Failed to generate user-friendly block message: {e}")
+                # Fallback to generic message
+                answer = "Your query was blocked because it violates our content policy. Please revise your query to comply with our terms of service. Continued violations may result in your IP being blocked."
+            
             return QueryResponse(
-                answer="This query violates our terms of service. Continued violations may result in your IP being blocked.",
+                answer=answer,
                 sources=[],
                 follow_up_questions=[
                     "How does Polkadot's governance system work?",
@@ -405,20 +366,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             logger.error(f"Error in processUserQuery: {qa_error}")
             
             # Send error details to Slack if available
-            if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
-                try:
-                    error_context = {
-                        "query": request.question,
-                        "user_id": request.user_id,
-                        "timestamp": datetime.now().isoformat(),
-                        "error_type": "query_processor_error"
-                    }
-                    slack_bot.post_error_to_slack(
-                        error_message=f"Query Processor Error: {str(qa_error)}",
-                        context=error_context
-                    )
-                except Exception as slack_error:
-                    logger.error(f"Failed to send error to Slack: {slack_error}")
+            send_query_error_notification(slack_bot, request.question, request.user_id, qa_error)
             
             # Return user-friendly error response
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -669,19 +617,7 @@ if __name__ == "__main__":
         logger.error(f"CRITICAL: {error_msg}")
         logger.error(traceback_str)
         
-        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
-            try:
-                slack_bot.post_error_to_slack(
-                    f"API Server crashed: {error_msg}",
-                    context={
-                        "error_type": exc_type.__name__,
-                        "error_message": str(exc_value),
-                        "traceback": traceback_str,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-            except Exception as slack_error:
-                logger.error(f"Failed to send crash notification to Slack: {slack_error}")
+        send_crash_notification(exc_type, exc_value, traceback_str)
     
     sys.excepthook = handle_unhandled_exception
     
@@ -700,18 +636,6 @@ if __name__ == "__main__":
         logger.error(f"CRITICAL: {error_msg}")
         logger.error(traceback_str)
         
-        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
-            try:
-                slack_bot.post_error_to_slack(
-                    f"API Server failed: {error_msg}",
-                    context={
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "traceback": traceback_str,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-            except Exception as slack_error:
-                logger.error(f"Failed to send error notification to Slack: {slack_error}")
+        send_crash_notification(type(e), e, traceback_str)
         
         sys.exit(1) 

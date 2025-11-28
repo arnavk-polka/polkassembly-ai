@@ -771,7 +771,7 @@ Now respond for this query:
         
         if getattr(qa_generator, "client", None):
             try:
-                router_model = os.getenv("ROUTER_MODEL", "gpt-4")
+                router_model = os.getenv("ROUTER_MODEL", "gpt-4.1")
                 response = qa_generator.client.chat.completions.create(
                     model=router_model,
                     messages=[{"role": "user", "content": routing_prompt}],

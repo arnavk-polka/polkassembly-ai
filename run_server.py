@@ -26,19 +26,8 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
     print(traceback_str, file=sys.stderr)
     
     try:
-        from src.rag.config import Config
-        if Config.ENABLE_SLACK_NOTIFICATIONS:
-            from src.utils.slack_bot import SlackBot
-            slack_bot = SlackBot()
-            slack_bot.post_error_to_slack(
-                f"API Server crashed: {error_msg}",
-                context={
-                    "error_type": exc_type.__name__,
-                    "error_message": str(exc_value),
-                    "traceback": traceback_str,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
+        from src.rag.server_monitor import send_crash_notification
+        send_crash_notification(exc_type, exc_value, traceback_str)
     except Exception as slack_error:
         print(f"Failed to send crash notification to Slack: {slack_error}", file=sys.stderr)
 
@@ -64,18 +53,8 @@ if __name__ == "__main__":
         print(traceback_str, file=sys.stderr)
         
         try:
-            if Config.ENABLE_SLACK_NOTIFICATIONS:
-                from src.utils.slack_bot import SlackBot
-                slack_bot = SlackBot()
-                slack_bot.post_error_to_slack(
-                    f"API Server failed: {error_msg}",
-                    context={
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                        "traceback": traceback_str,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+            from src.rag.server_monitor import send_crash_notification
+            send_crash_notification(type(e), e, traceback_str)
         except Exception as slack_error:
             print(f"Failed to send error notification to Slack: {slack_error}", file=sys.stderr)
         
