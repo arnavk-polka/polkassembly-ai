@@ -69,6 +69,9 @@ class Config:
     POLKASSEMBLY_AI_TOKEN = os.getenv("POLKASSEMBLY_AI_TOKEN", "")
     ENABLE_AUTHENTICATION = os.getenv("ENABLE_AUTHENTICATION", "true").lower() == "true"
     
+    # Slack Notifications Configuration
+    ENABLE_SLACK_NOTIFICATIONS = os.getenv("ENABLE_SLACK_NOTIFICATIONS", "false").lower() in ("true", "1", "yes", "on")
+    
     @classmethod
     def validate_config(cls):
         """Validate that required configuration is present"""

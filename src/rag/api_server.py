@@ -111,18 +111,22 @@ async def lifespan(app: FastAPI):
         )
         
         # Initialize Slack bot for error reporting
-        try:
-            logger.info("Initializing Slack bot for error reporting...")
-            slack_bot = SlackBot()
-            logger.info("Slack bot initialized successfully")
-            
-            slack_bot.post_to_slack({
-                "event": "API Server Started",
-                "status": "RUNNING 🚀",
-                "timestamp": datetime.now().isoformat(),
-            })
-        except Exception as e:
-            logger.warning(f"Failed to initialize Slack bot: {e}. Error reporting to Slack will be disabled.")
+        if Config.ENABLE_SLACK_NOTIFICATIONS:
+            try:
+                logger.info("Initializing Slack bot for error reporting...")
+                slack_bot = SlackBot()
+                logger.info("Slack bot initialized successfully")
+                
+                slack_bot.post_to_slack({
+                    "event": "API Server Started",
+                    "status": "RUNNING 🚀",
+                    "timestamp": datetime.now().isoformat(),
+                })
+            except Exception as e:
+                logger.warning(f"Failed to initialize Slack bot: {e}. Error reporting to Slack will be disabled.")
+                slack_bot = None
+        else:
+            logger.info("Slack notifications disabled (ENABLE_SLACK_NOTIFICATIONS=false)")
             slack_bot = None
         
         # Initialize semantic reranker
@@ -145,7 +149,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize API: {e}")
         logger.error(traceback.format_exc())
         
-        if slack_bot:
+        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
             try:
                 slack_bot.post_error_to_slack(
                     f"API Server startup failed: {str(e)}",
@@ -175,7 +179,7 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"Shutting down Polkadot AI Chatbot API... Reason: {shutdown_reason}")
     
-    if slack_bot:
+    if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
         try:
             shutdown_context = {
                 "reason": shutdown_reason,
@@ -401,7 +405,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             logger.error(f"Error in processUserQuery: {qa_error}")
             
             # Send error details to Slack if available
-            if slack_bot:
+            if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
                 try:
                     error_context = {
                         "query": request.question,
@@ -665,7 +669,7 @@ if __name__ == "__main__":
         logger.error(f"CRITICAL: {error_msg}")
         logger.error(traceback_str)
         
-        if slack_bot:
+        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
             try:
                 slack_bot.post_error_to_slack(
                     f"API Server crashed: {error_msg}",
@@ -696,7 +700,7 @@ if __name__ == "__main__":
         logger.error(f"CRITICAL: {error_msg}")
         logger.error(traceback_str)
         
-        if slack_bot:
+        if slack_bot and Config.ENABLE_SLACK_NOTIFICATIONS:
             try:
                 slack_bot.post_error_to_slack(
                     f"API Server failed: {error_msg}",

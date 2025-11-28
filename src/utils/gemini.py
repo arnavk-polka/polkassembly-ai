@@ -55,7 +55,6 @@ class GeminiClient:
         
         # Test API key validity during initialization
         print(f"Initializing Gemini client with model: {model_name}")
-        print(f"API Key (first 10 chars): {self.api_key[:10]}...")
         
         try:
             # Initialize the client
