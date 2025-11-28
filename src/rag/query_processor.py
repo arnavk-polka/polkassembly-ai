@@ -260,8 +260,8 @@ false
 (lowercase, no extra text)."""
     
     try:
-        # Use GPT-4 for better accuracy on this task
-        model_to_use = "gpt-4"
+        # Use gpt-4o-mini for cost efficiency - ambiguity check is a simple binary decision
+        model_to_use = "gpt-4o-mini"
         
         response = qa_generator.client.chat.completions.create(
             model=model_to_use,
