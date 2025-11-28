@@ -1189,11 +1189,14 @@ async def processUserQuery(
                     "decision": decision
                 })
                 
+                sql_query_context = qa_result.get('sql_query') or (qa_result.get('sql_queries', [None])[0] if qa_result.get('sql_queries') else None)
                 internet_result = await generate_internet_search_response(
                     query=analyzed_query,
                     qa_generator=qa_generator,
                     log_step=log_step,
-                    route=route
+                    route=route,
+                    sql_query=sql_query_context,
+                    validator_reason=validator_reason
                 )
                 
                 internet_result['route'] = route
@@ -1292,12 +1295,15 @@ async def processUserQuery(
                         "note": "Using requires_fallback flag or result_count == 0 (validator_verdict missing)"
                     })
                     
+                    sql_query_context = qa_result.get('sql_query') or (qa_result.get('sql_queries', [None])[0] if qa_result.get('sql_queries') else None)
                     internet_result = await generate_internet_search_response(
                         query=analyzed_query,
                         qa_generator=qa_generator,
                         log_step=log_step,
                         route=route,
-                        conversation_history=conversationHistory
+                        conversation_history=conversationHistory,
+                        sql_query=sql_query_context,
+                        validator_reason=validator_reason
                     )
                     
                     internet_result['route'] = route
@@ -1390,12 +1396,15 @@ async def processUserQuery(
                     "result_count": result_count
                 })
                 
+                sql_query_context = qa_result.get('sql_query') or (qa_result.get('sql_queries', [None])[0] if qa_result.get('sql_queries') else None)
                 internet_result = await generate_internet_search_response(
                     query=analyzed_query,
                     qa_generator=qa_generator,
                     log_step=log_step,
                     route=route,
-                    conversation_history=conversationHistory
+                    conversation_history=conversationHistory,
+                    sql_query=sql_query_context,
+                    validator_reason=qa_result.get('validator_reason')
                 )
                 
                 internet_result['route'] = route
