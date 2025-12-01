@@ -1150,6 +1150,12 @@ class Query2SQL:
             - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
             - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
 
+            FOLLOW-UP ENGAGEMENT:
+            - At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. ONLY IF RELEVANT. This is optional and does not have to be done for every query.
+            - Make the suggestion conversational and contextually relevant to the data you just presented
+            - Examples: "Would you like more details about these proposals?" or "Would you like to explore similar proposals on Kusama?".
+            - Keep the follow-up suggestion brief (one sentence) and directly related to the query results
+
             Focus on providing accurate, specific information from the query results. The data has been successfully retrieved from the blockchain database.
             """
             
@@ -1514,7 +1520,7 @@ You must return ONLY valid JSON with these exact keys:
 
 Rules:
 - entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, discussions, voters, delegates, or unknown)
-- If the query mentions "discussion" or asks about a discussion post, use entity_type: "discussion"
+- If the query mentions "discussion" or asks about a discussion post, use entity_type: "discussion. Also ref means referendum and referenda."
 - network: Extract network preference (polkadot, kusama, both, or unspecified if not mentioned)
 - id: Extract specific proposal/referendum ID if mentioned (number or null)
 - time_range: Extract time filter if mentioned (last_30_days, last_90_days, all_time, or unspecified)
@@ -1834,21 +1840,24 @@ DATABASE SCHEMA:
                   * "awarded" -> "Awarded"
                   * "passed" -> "Awarded"
                 - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
-                  * "executed" -> "Executed" (referendums can have "Executed" status)
-                  * "passed" -> "Passed" or "Executed" (depending on context)
+                  * "executed" -> "Executed"
                   * "confirmed" -> "Confirmed"
+                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
+                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
+                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
                 - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
                   * "executed" -> "Awarded" or "Claimed" (depending on context)
-                - General status mappings:
-                  * "voting" or "in voting" -> "Deciding" (for referendums, proposals)
-                  * "active" -> "Deciding" or "Confirming" (depending on context)
-                  * "rejected" -> "Rejected"
-                  * "cancelled" -> "Cancelled"
-                  * "killed" -> "Killed"
-                  * "timed out" -> "TimedOut"
-                - Valid status values vary by proposal type - check what statuses actually exist for each type
+                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted', 'Active', 'Added', 'Approved', 'CuratorUnassigned', 'CuratorAssigned', 'CuratorProposed', 'Proposed', 'Extended', 'Awarded')
+                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
+                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
+                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
+                
                 - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
                 - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
+                - Example: "Show active referenda" -> WHERE "source_proposal_type" = 'ReferendumV2' AND "onchaininfo_status" IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
 
 
             CRITICAL NULL VALUE HANDLING:
@@ -2081,21 +2090,28 @@ DATABASE SCHEMA:
                   * "awarded" -> "Awarded"
                   * "passed" -> "Awarded"
                 - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
-                  * "executed" -> "Executed" (referendums can have "Executed" status)
-                  * "passed" -> "Passed" or "Executed" (depending on context)
+                  * "executed" -> "Executed"
                   * "confirmed" -> "Confirmed"
+                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
+                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
+                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
                 - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
                   * "executed" -> "Awarded" or "Claimed" (depending on context)
+                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted', 'Active', 'Added', 'Approved', 'CuratorUnassigned', 'CuratorAssigned', 'CuratorProposed', 'Proposed', 'Extended', 'Awarded')
+                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
+                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
+                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
                 - General status mappings:
-                  * "voting" or "in voting" -> "Deciding" (for referendums, proposals)
-                  * "active" -> "Deciding" or "Confirming" (depending on context)
                   * "rejected" -> "Rejected"
                   * "cancelled" -> "Cancelled"
                   * "killed" -> "Killed"
                   * "timed out" -> "TimedOut"
-                - Valid status values vary by proposal type - check what statuses actually exist for each type
                 - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
                 - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
+                - Example: "Show active referenda" -> WHERE "source_proposal_type" = 'ReferendumV2' AND "onchaininfo_status" IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
 
 
             CRITICAL NULL VALUE HANDLING:
@@ -2836,15 +2852,19 @@ class VoteQuery2SQL:
                 - https://polkadot.polkassembly.io/referenda/{{proposal_index}} 
             8. When you receive voting self_voting_power, then always remove 9 zero from it. For ex: 10000000000 becomes 1 DOT. DOT is the unit here.
             9. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
+            10. FOLLOW-UP ENGAGEMENT: At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. Make the suggestion conversational and contextually relevant to the data you just presented. Examples: "Would you like to see details about this proposal?" or "Would you like to explore voting patterns for other proposals?" Keep it brief (one sentence) and directly related to the query results. This is optional and does not have to be done for every query.
                
             
             EXAMPLES:
-            - Question: "What proposal got the most votes?" 
-              Good: "Proposal 1424 received the highest voting power with 2,955,235,968,346,605,113."
+            - Question: "Show me the no of referenda in july 2025?" 
+              Good: "There were 40 referenda created in April 2025. Would you like to see more details about each referenda?"
               Bad: "The proposal that received the highest number of votes... This indicates... It's interesting to note..."
-            
-            - Question: "Analyze voting patterns for treasury proposals"
+
+              - Question: "Analyze voting patterns for treasury proposals"
               Good: [Longer response with analysis since "analyze" was requested]
+            
+            - Question: "How many votes did referenda 1728 recieve till now?"
+              Good: "Referenda 1728 has received 1000 votes till now. Would you like to see more details about the referenda?`"
             
             Response:
             """
