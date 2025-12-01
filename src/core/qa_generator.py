@@ -1,0 +1,1512 @@
+import openai
+import logging
+import json
+from typing import List, Dict, Any, Optional
+import re
+from .web_search import search_tavily
+from dotenv import load_dotenv
+import os
+import numpy as np
+from .gemini_client import GeminiClient
+import time
+import sys
+from datetime import datetime, timedelta
+
+from .memory import get_memory_manager, add_user_query, add_assistant_response
+# Content guardrails now handled by Bedrock guardrails in the API endpoint
+from ..integrations.slack_bot import SlackBot
+
+# Load environment variables
+load_dotenv()
+
+# Helper function to print model usage in green
+def print_model_usage(model_name: str, purpose: str):
+    """Print model usage information in green color"""
+    GREEN = '\033[92m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+    print(f"{GREEN}{BOLD}🤖 Using {model_name} for {purpose}{END}")
+
+# Get Gemini timeout from environment
+GEMINI_TIMEOUT = float(os.getenv('GEMINI_TIMEOUT', '30'))
+
+# Import ask_question from the texttosql module
+from ..dynamic_sql.query_api import ask_question
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+from .errors import is_insufficient_quota_error, get_quota_error_message
+
+class QAGenerator:
+    """Generate answers using OpenAI based on retrieved document chunks"""
+    
+    def __init__(self, 
+                 openai_api_key: str,
+                 model: str = "gpt-3.5-turbo",
+                 temperature: float = 0.1,
+                 max_tokens: int = 1000,
+                 enable_web_search: bool = True,
+                 web_search_context_size: str = "high",
+                 enable_memory: bool = True):
+        
+        self.openai_api_key = openai_api_key
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.enable_web_search = enable_web_search
+        self.web_search_context_size = web_search_context_size
+        self.enable_memory = enable_memory
+        
+        # Timeout configuration
+        self.api_timeout = float(os.getenv('API_TIMEOUT', '10'))  # Default 10 seconds
+        
+        # Initialize OpenAI client with timeout
+        self.client = openai.OpenAI(api_key=self.openai_api_key, timeout=self.api_timeout)
+        
+        # Initialize Gemini client (optional) with timeout
+        try:
+            self.gemini_client = GeminiClient(timeout=GEMINI_TIMEOUT)
+            logger.info("Gemini client initialized successfully")
+        except Exception as e:
+            logger.warning(f"Gemini client initialization failed: {e}")
+            logger.info("Continuing without Gemini client (OpenAI only mode)")
+            self.gemini_client = None
+        
+        # Content guardrails now handled by Bedrock guardrails in the API endpoint
+        logger.info("Content moderation will be handled by Bedrock guardrails")
+        
+        # Initialize memory manager
+        self.memory_manager = get_memory_manager() if enable_memory else None
+        if self.memory_manager and self.memory_manager.enabled:
+            logger.info("Memory functionality enabled")
+        else:
+            logger.info("Memory functionality disabled")
+        
+        # Initialize Slack bot for error notifications
+        try:
+            self.slack_bot = SlackBot()
+            logger.info("Slack bot initialized for error notifications")
+        except Exception as e:
+            logger.warning(f"Slack bot initialization failed: {e}")
+            logger.info("Continuing without Slack notifications")
+            self.slack_bot = None
+    
+    def send_error_to_slack(self, query: str, error: str, error_source: str = "Klara") -> None:
+        """Send error notification to Slack channel"""
+        if not self.slack_bot:
+            return
+        
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+            error_context = {
+                "query": query,
+                "timestamp": timestamp,
+                "error_source": error_source,
+                "error_details": str(error)
+            }
+            
+            self.slack_bot.post_error_to_slack(
+                "Query processing failed", 
+                context=error_context
+            )
+            logger.info("Error notification sent to Slack")
+        except Exception as slack_error:
+            logger.error(f"Failed to send error notification to Slack: {slack_error}")
+    
+    def create_context_from_chunks(self, chunks: List[Dict[str, Any]], max_context_length: int = 4000) -> str:
+        """
+        Create context string from retrieved chunks
+        
+        Args:
+            chunks: List of chunk dictionaries with content and metadata
+            max_context_length: Maximum length of context in characters
+            
+        Returns:
+            Formatted context string
+        """
+        context_parts = []
+        current_length = 0
+        
+        for i, chunk in enumerate(chunks):
+            # Format chunk with source information
+            source_info = ""
+            metadata = chunk.get('metadata', {})
+            
+            if metadata.get('title'):
+                source_info += f"Title: {metadata['title']}\n"
+            if metadata.get('url'):
+                source_info += f"URL: {metadata['url']}\n"
+            if metadata.get('source'):
+                source_info += f"Source: {metadata['source']}\n"
+            
+            chunk_text = f"--- Document {i+1} ---\n{source_info}\nContent:\n{chunk['content']}\n\n"
+            
+            # Check if adding this chunk would exceed the max length
+            if current_length + len(chunk_text) > max_context_length:
+                break
+            
+            context_parts.append(chunk_text)
+            current_length += len(chunk_text)
+        
+        return ''.join(context_parts)
+    
+    async def generate_answer_with_web_search(self, query: str, user_id: str = "default_user", conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Generate answer using OpenAI with web search-like knowledge
+        
+        Args:
+            query: User's question
+            user_id: User identifier for memory operations
+            
+        Returns:
+            Dictionary with answer and metadata
+        """
+        try:
+            logger.info(f"Using web search fallback for query: '{query[:50]}...'")
+            
+            # Get memory context and add query to memory if memory is enabled
+            memory_context = ""
+            if self.memory_manager and self.memory_manager.enabled:
+                memory_context = self.memory_manager.get_memory_context(query, user_id)
+                self.memory_manager.add_user_query(query, user_id)
+            
+            # Create a comprehensive system prompt for web search-like responses
+            system_prompt = self._get_default_system_prompt()
+            
+            # Create user prompt with memory context and conversation history
+            user_prompt_parts = []
+            
+            # Add conversation history if available
+            if conversation_history:
+                formatted_history = self._format_conversation_history(conversation_history)
+                user_prompt_parts.append(f"Conversation History:\n{formatted_history}")
+            
+            if memory_context:
+                user_prompt_parts.append(f"Previous conversation context:\n{memory_context}")
+            
+            user_prompt_parts.append(f"Current Question about Polkadot: {query}")
+            user_prompt = "\n\n".join(user_prompt_parts)
+            
+            if os.getenv("WEB_SEARCH"):
+                try:
+                    #do the web search first
+                    answer, sources = await search_tavily(query)
+                except:
+                    #fall back to openAI
+                    logger.info("Web search failed, falling back to OpenAI")
+                    response = self.client.chat.completions.create(
+                        model="gpt-4o" if "gpt-4" in self.model or self.model == "gpt-3.5-turbo" else self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.1,  # Lower temperature for more factual responses
+                        max_tokens=self.max_tokens
+                    )
+                    answer = response.choices[0].message.content
+                    sources = []  # Initialize empty sources for fallback
+            else:
+                #no web search
+                response = self.client.chat.completions.create(
+                    model="gpt-4o" if "gpt-4" in self.model or self.model == "gpt-3.5-turbo" else self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.1,  # Lower temperature for more factual responses
+                    max_tokens=self.max_tokens
+                )
+                answer = response.choices[0].message.content
+                sources = []
+            
+            # Clean any example.com URLs from the response
+            answer = self.clean_example_urls(answer)
+            
+            # Apply content guardrails but preserve markdown formatting
+            # answer = self.guardrails.sanitize_response(answer)
+            
+            # Add assistant response to memory if memory is enabled
+            if self.memory_manager and self.memory_manager.enabled:
+                self.memory_manager.add_assistant_response(answer, user_id)
+            
+            # Create web search-style sources
+            if len(sources) > 0:
+                sources = sources[:np.random.randint(1, 4)]
+            else:
+                sources = [
+                    {
+                        'title': 'Polkadot Knowledge Base',
+                        'url': 'https://polkadot.network',
+                        'source_type': 'web_search',
+                        'similarity_score': 0.9
+                    },
+                    {
+                        'title': 'Polkadot Wiki',
+                        'url': 'https://wiki.polkadot.network',
+                        'source_type': 'web_search',
+                        'similarity_score': 0.9
+                    },
+                    {
+                        'title': 'Polkadot Documentation',
+                        'url': 'https://docs.polkadot.network',
+                        'source_type': 'web_search',
+                        'similarity_score': 0.9
+                    }
+                ]
+            
+            # Generate follow-up questions for web search results
+            follow_up_questions = self._get_fallback_follow_ups(query)
+            
+            return {
+                'answer': answer,
+                'sources': sources,
+                'confidence': 0.8,  # High confidence for knowledge-based responses
+                'follow_up_questions': follow_up_questions,
+                'context_used': True,
+                'model_used': 'gpt-4o',
+                'chunks_used': 0,
+                'search_method': 'web_search'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error with web search fallback: {e}")
+            return {
+                'answer': "I encountered an error while searching for information. Please try again or rephrase your question.",
+                'sources': [
+                    {
+                        'title': 'Polkadot Network',
+                        'url': 'https://polkadot.network',
+                        'source_type': 'web_search',
+                        'similarity_score': 1.0
+                    }
+                ],
+                'confidence': 0.0,
+                'follow_up_questions': self._get_fallback_follow_ups(query),
+                'context_used': False,
+                'error': str(e),
+                'search_method': 'web_search_failed'
+            }
+    
+    def remove_double_asterisks(self, text):
+        return text.replace("**", "").replace("-", "")
+    
+    def clean_example_urls(self, text):
+        """
+        Remove any lines containing links that don't contain the polkassembly S3 bucket URL.
+        Only allows links from https://polkassembly-ai.s3.us-east-1.amazonaws.com
+        """
+        import re
+        
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        # Pattern to match image markdown: ![alt text](url)
+        image_pattern = r'!\[([^\]]*)\]\(([^)]+)\)'
+        
+        for line in lines:
+            should_include_line = True
+            
+            # Check if line contains image markdown
+            image_matches = re.findall(image_pattern, line)
+            
+            if image_matches:
+                for alt_text, url in image_matches:
+                    # Only keep links that contain our S3 bucket URL
+                    if 'https://polkassembly-ai.s3.us-east-1.amazonaws.com' not in url:
+                        should_include_line = False
+                        logger.info(f"Removed image line with invalid URL: {line.strip()}")
+                        break
+            
+            if should_include_line:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+    
+
+    
+    def _fallback_to_static_response(self, query: str, user_id: str) -> Dict[str, Any]:
+        """
+        Fallback response when dynamic query processing fails
+        """
+        return {
+            'answer': "I encountered an issue fetching the specific proposal data you requested. Please try rephrasing your question or check if the proposal ID is correct. You can also try asking about general Polkadot governance topics.",
+            'sources': [
+                {
+                    'title': 'Polkadot Governance',
+                    'url': 'https://polkadot.polkassembly.io',
+                    'source_type': 'platform',
+                    'similarity_score': 0.8
+                }
+            ],
+            'confidence': 0.3,
+            'context_used': False,
+            'model_used': self.model,
+            'chunks_used': 0,
+            'search_method': 'dynamic_fallback',
+            'error': 'Failed to fetch proposal data'
+        }
+
+    def analyze_query_with_memory(self, query: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Analyze query with conversation history to add memory/context awareness"""
+        try:
+            # Early return if no context needed
+            if not conversation_history or not hasattr(self, 'client') or not self.client:
+                return query
+            
+            # Optimize: Only use recent conversation history (last 5-10 messages)
+            # This saves tokens and focuses on relevant context
+            max_history_length = 5
+            recent_history = conversation_history[-max_history_length:] if len(conversation_history) > max_history_length else conversation_history
+            
+            # Convert conversation history to serializable format
+            # Filter out clarification questions (assistant messages that are questions)
+            serializable_history = []
+            for msg in recent_history:
+                content = None
+                role = None
+                
+                if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                    role = msg.role
+                    content = msg.content
+                elif isinstance(msg, dict):
+                    role = msg.get("role", "user")
+                    content = msg.get("content", str(msg))
+                else:
+                    role = "user"
+                    content = str(msg)
+                
+                # Skip clarification questions (assistant messages that are questions)
+                # In this system, any assistant message that's a question is a clarification question
+                # These should not be used as context for query analysis
+                if role == "assistant" and content:
+                    content_str = str(content).strip()
+                    # If it's a question (ends with '?'), skip it - it's a clarification question
+                    if content_str.endswith('?'):
+                        continue  # Skip this message
+                
+                serializable_history.append({
+                    "role": role,
+                    "content": content
+                })
+            
+            # Include current date to resolve relative time references
+            current_date = datetime.utcnow()
+            current_date_str = current_date.strftime("%Y-%m-%d")
+            current_month_str = current_date.strftime("%B %Y")
+            last_month = (current_date.replace(day=1) - timedelta(days=1))
+            last_month_str = last_month.strftime("%B %Y")
+            yesterday_str = (current_date - timedelta(days=1)).strftime("%Y-%m-%d")
+            last_year_str = (current_date.replace(month=1, day=1) - timedelta(days=1)).strftime("%Y")
+            
+            # Improved prompt with better structure and examples (with current date context)
+            analysis_prompt = f"""You are a query context analyzer. Today's date is {current_date_str} (UTC).
+Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
+
+CONVERSATION HISTORY:
+{self._format_conversation_history(serializable_history)}
+
+CURRENT USER QUERY: "{query}"
+
+IMPORTANT: 
+- The CURRENT USER QUERY above is the actual query you should analyze
+- Do NOT use clarification questions from the conversation history as the query
+- Only use the conversation history to understand context for incomplete queries (e.g., "what about June?")
+- If the current user query already explicitly specifies the topic (e.g., mentions "Polkadot", "OpenGov", "treasury", etc.), you MUST leave it exactly as-is.
+- You are NOT allowed to invent new context like specific networks or frameworks unless the user explicitly mentioned them earlier in the conversation.
+
+INSTRUCTIONS:
+1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
+2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
+3. Preserve the user's intent and style
+4. Keep technical terms and column names consistent with previous queries
+5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
+6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
+7. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
+   - "this month" → "{current_month_str}"
+   - "last month" → "{last_month_str}"
+   - "today" → "{current_date_str}"
+   - "yesterday" → "{yesterday_str}"
+   - "last year" → "{last_year_str}"
+   - Never guess dates beyond what can be derived from today's date.
+
+EXAMPLES:
+
+Example 1:
+Previous: "Give me total number of referendums in July 2025"
+Current: "what about June?"
+Output: "Give me total number of referendums in June 2025"
+
+Example 2:
+Previous: "Show top 10 proposals by vote count"
+Current: "include their titles too"
+Output: "Show top 10 proposals with their titles by vote count"
+
+Example 3:
+Previous: "List all treasury proposals"
+Current: "filter for amount > 1000"
+Output: "List all treasury proposals with amount > 1000"
+
+Example 4:
+Current: "Show me all active referendums"
+Output: "Show me all active referendums" (unchanged - already complete)
+
+RESPONSE FORMAT:
+Return ONLY a JSON object with this exact structure:
+{{"analyzed_query": "your rewritten query here"}}
+
+No explanations, no markdown, just the JSON."""
+
+            # Get analysis from OpenAI
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a query context analyzer. Return only valid JSON."},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                openai_response = response.choices[0].message.content
+                if not openai_response:
+                    return query
+                
+                # Parse response with better error handling
+                analyzed_query = self._parse_gemini_response(openai_response, query)
+            except Exception as e:
+                logger.warning(f"OpenAI query analysis failed: {e}, returning original query")
+                return query
+            
+            # Validation: ensure analyzed query is not empty or just whitespace
+            if not analyzed_query or analyzed_query.strip() == "":
+                logger.warning("Analyzed query is empty, returning original")
+                return query
+            
+            # Critical validation: reject if analyzed query contains clarification question patterns
+            # This prevents the LLM from prepending clarification questions from history
+            analyzed_lower = analyzed_query.lower().strip()
+            clarification_patterns = [
+                'are you referring to',
+                'are you looking for',
+                'are you asking about',
+                'can you clarify',
+                'which network',
+                'polkadot or kusama',
+                'which proposal',
+                'which referendum'
+            ]
+            
+            # Check if analyzed query starts with a clarification question
+            starts_with_clarification = any(analyzed_lower.startswith(pattern) for pattern in clarification_patterns)
+            
+            # Also check if it contains a clarification question followed by the original query
+            contains_clarification_prefix = False
+            for pattern in clarification_patterns:
+                if pattern in analyzed_lower:
+                    # Check if original query appears after the clarification
+                    original_in_analyzed = query.lower().strip() in analyzed_lower
+                    if original_in_analyzed and analyzed_lower.index(pattern) < analyzed_lower.index(query.lower().strip()):
+                        contains_clarification_prefix = True
+                        break
+            
+            if starts_with_clarification or contains_clarification_prefix:
+                logger.warning(f"Analyzed query contains clarification question pattern, returning original. Analyzed: '{analyzed_query[:100]}'")
+                return query
+            
+            # Log only if query was actually modified
+            if analyzed_query.lower().strip() != query.lower().strip():
+                logger.info(f"Query modified: '{query}' → '{analyzed_query}'")
+            
+            return analyzed_query
+            
+        except Exception as e:
+            logger.error(f"Error in query analysis: {e}", exc_info=True)
+            return query
+
+    def _format_conversation_history(self, history: List[Dict[str, Any]]) -> str:
+        """Format conversation history in a readable way"""
+        if not history:
+            return "No previous conversation"
+        
+        formatted = []
+        for i, msg in enumerate(history, 1):
+            role = msg.get("role", "user").capitalize()
+            content = msg.get("content", "")
+            # Truncate very long messages
+            if len(content) > 200:
+                content = content[:200] + "..."
+            formatted.append(f"{i}. {role}: {content}")
+        
+        return "\n".join(formatted)
+
+    def _get_gemini_response_with_retry(self, prompt: str, max_retries: int = 2) -> str:
+        """Get response from Gemini with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                response = self.gemini_client.get_response(prompt)
+                if response and response.strip():
+                    return response
+            except Exception as e:
+                logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(1)  # Brief pause before retry
+        
+        raise Exception("All Gemini API attempts failed")
+
+    def _parse_gemini_response(self, response: str, fallback_query: str) -> str:
+        """Parse Gemini JSON response with multiple fallback strategies"""
+        try:
+            # Strategy 1: Direct JSON parse
+            response_json = json.loads(response.strip())
+            return response_json.get("analyzed_query", fallback_query)
+        
+        except json.JSONDecodeError:
+            # Strategy 2: Extract JSON from markdown code blocks
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+            if json_match:
+                try:
+                    response_json = json.loads(json_match.group(1))
+                    return response_json.get("analyzed_query", fallback_query)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Strategy 3: Find JSON object in text
+            json_match = re.search(r'\{[^}]*"analyzed_query"[^}]*\}', response, re.DOTALL)
+            if json_match:
+                try:
+                    response_json = json.loads(json_match.group(0))
+                    return response_json.get("analyzed_query", fallback_query)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Strategy 4: Extract quoted text after "analyzed_query"
+            quote_match = re.search(r'analyzed_query["\s:]+(["\'])(.*?)\1', response, re.DOTALL)
+            if quote_match:
+                return quote_match.group(2).strip()
+            
+            # Final fallback: log and return original
+            logger.warning(f"Could not parse LLM response: {response[:200]}")
+            return fallback_query
+
+    def _determine_table_from_query(self, query: str) -> Optional[str]:
+        """
+        Determine which table to use for dynamic queries based on query content using LLM.
+        
+        Args:
+            query: The user query
+            
+        Returns:
+            Table name: "governance_data" or "voting_data"
+        """
+        import json
+        
+        prompt = f"""You are a query classifier for a blockchain governance database. Determine which table to query.
+
+Query: "{query}"
+
+Tables:
+
+1. governance_data - Contains proposal information:
+   - Proposal details (title, content, description, status, type)
+   - Proposal metadata (dates, network, proposer)
+   - Financial data (amounts, beneficiaries, asset IDs)
+   - Proposal metrics (likes, comments)
+   - Examples:
+     * "Show me recent treasury proposals"
+     * "What's the status of proposal 123?"
+     * "Find proposals requesting more than 10000 DOT"
+     * "List all executed referendums"
+     * "Who proposed referendum 456?"
+     * "Show me proposals about topic X"
+
+2. voting_data - Contains voter activity and behavior:
+   - Voter accounts and addresses
+   - Vote decisions (Aye/Nay/Abstain)
+   - Voting power and locked amounts
+   - Conviction multipliers and lock periods
+   - Vote delegation
+   - Voting timestamps
+   - Examples:
+     * "How many people voted on proposal 123?"
+     * "Show me votes with 6x conviction"
+     * "Who voted Aye on referendum 456?"
+     * "List voters with >1000 DOT voting power"
+     * "Show delegated votes for proposal X"
+     * "What was voter Y's decision?"
+     * "Count unique voters in the last 30 days"
+
+Decision Rules:
+- If query asks about WHO voted, HOW people voted, VOTER behavior → voting_data
+- If query asks about WHAT proposals exist, proposal STATUS, proposal DETAILS → governance_data
+- If query mentions both, prioritize the main focus:
+  * "Show me voters who participated in treasury proposals" → voting_data (focus: voters)
+  * "Show me treasury proposals and their vote counts" → governance_data (focus: proposals)
+
+Respond with ONLY valid JSON:
+{{"table": "governance_data"}} or {{"table": "voting_data"}}"""
+
+        try:
+            # Try Gemini first (faster)
+            if self.gemini_client:
+                response = self.gemini_client.get_response(prompt)
+                response = response.strip()
+                
+                # Parse JSON
+                try:
+                    result = json.loads(response)
+                    table = result.get('table', 'governance_data')
+                    if table in ['governance_data', 'voting_data']:
+                        logger.info(f"Table selected by Gemini: {table}")
+                        return table
+                except json.JSONDecodeError:
+                    # Extract table name from text if JSON parsing fails
+                    if 'voting_data' in response.lower():
+                        logger.info("Table selected by Gemini (text parsing): voting_data")
+                        return "voting_data"
+            
+            # Fallback to OpenAI
+            if self.client:
+                response = self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=50
+                )
+                response_text = response.choices[0].message.content.strip()
+                
+                # Parse JSON
+                try:
+                    result = json.loads(response_text)
+                    table = result.get('table', 'governance_data')
+                    if table in ['governance_data', 'voting_data']:
+                        logger.info(f"Table selected by OpenAI: {table}")
+                        return table
+                except json.JSONDecodeError:
+                    # Extract table name from text if JSON parsing fails
+                    if 'voting_data' in response_text.lower():
+                        logger.info("Table selected by OpenAI (text parsing): voting_data")
+                        return "voting_data"
+        
+        except Exception as e:
+            logger.warning(f"Error in LLM table selection: {e}")
+        
+        # Default fallback to governance_data
+        logger.info("Table selected (fallback): governance_data")
+        return "governance_data"
+
+    async def generate_answer(self, 
+                       query: str, 
+                       chunks: List[Dict[str, Any]], 
+                       custom_prompt: Optional[str] = None,
+                       user_id: str = "default_user",
+                       conversation_history: Optional[List[Dict[str, Any]]] = None,
+                       route: Optional[str] = None,
+                       route_confidence: Optional[float] = None,
+                       dynamic_embedding_manager=None) -> Dict[str, Any]:
+        """
+        Generate an answer based on the query and retrieved chunks, with web search fallback
+
+        CRITICAL FORMATTING RULES:
+        ✅ PROFESSIONAL FORMATTING REQUIREMENTS:
+        - Use plain text without any markdown symbols (**, *, ##, -, etc.)
+        - ALWAYS add line breaks between numbered steps
+        - ALWAYS add line breaks between bullet points
+        - Use numbered lists (1. 2. 3.) for step-by-step instructions with line breaks
+        - Use simple bullet points without dashes or symbols
+        - Write in clean, professional sentences
+        - Use quotation marks for emphasis instead of bold/italic
+        
+        Args:
+            query: User's question
+            chunks: Retrieved document chunks
+            custom_prompt: Optional custom system prompt
+            
+        Returns:
+            Dictionary with answer, sources, and metadata
+        """
+        try:
+            # Print user query in green color
+            print(f"\033[92m📝 User Query: {query}\033[0m")
+            
+            # Route is provided by query_processor.py
+            analyzed_query = query  # Query already analyzed in processUserQuery
+            
+            # Map route values to data_source values for internal processing
+            if route == 'dynamic':
+                route_result_data_source = 'ONCHAIN'
+                route_result_table = self._determine_table_from_query(query)
+            elif route == 'hybrid':
+                route_result_data_source = 'HYBRID'
+                route_result_table = self._determine_table_from_query(query)
+                logger.info(f"Hybrid route detected: will execute SQL query and combine with static chunks")
+            elif route == 'generic':
+                route_result_data_source = 'STATIC'
+                route_result_table = None
+            else:  # static
+                route_result_data_source = 'STATIC'
+                route_result_table = None
+            
+            logger.info(f"Using route: {route} -> {route_result_data_source}, table: {route_result_table}")
+            
+            # Handle dynamic data source (ONCHAIN queries)
+            if route_result_data_source == 'ONCHAIN':
+                try:
+                    # Use the ask_question function from query_api with conversation history
+                    # Pass dynamic_embedding_manager for contextual SQL generation (governance only)
+                    sql_result = ask_question(analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
+                    
+                    # Check if SQL precision was too low (requires clarification)
+                    if sql_result.get('requires_clarification', False):
+                        return {
+                            'answer': '',
+                            'sources': [],
+                            'confidence': 0.0,
+                            'follow_up_questions': [],
+                            'context_used': False,
+                            'model_used': 'sql_query',
+                            'chunks_used': 0,
+                            'search_method': 'sql_precision_too_low',
+                            'sql_query': sql_result.get('sql_queries', []),
+                            'result_count': 0,
+                            'success': False,
+                            'requires_clarification': True,
+                            'sql_precision': sql_result.get('sql_precision', 0.0)
+                        }
+                    
+                    # Check if no results found (requires fallback)
+                    if sql_result.get('requires_fallback', False):
+                        return {
+                            'answer': '',
+                            'sources': [],
+                            'confidence': 0.0,
+                            'follow_up_questions': [],
+                            'context_used': False,
+                            'model_used': 'sql_query',
+                            'chunks_used': 0,
+                            'search_method': 'no_results',
+                            'sql_query': sql_result.get('sql_queries', []),
+                            'result_count': 0,
+                            'success': False,
+                            'requires_fallback': True
+                        }
+                    
+                    # Generate follow-up questions
+                    try:
+                        follow_up_questions = self._generate_follow_up_questions(analyzed_query, [], sql_result.get('natural_response', ''))
+                    except Exception:
+                        follow_up_questions = [
+                            "How does Polkadot's governance system work?",
+                            "What are the benefits of staking DOT tokens?",
+                            "How do parachains connect to Polkadot?"
+                        ]
+                    
+                    # Format response to match expected structure (same format as other routes)
+                    return {
+                        'answer': sql_result.get('natural_response', 'No response available'),
+                        'sources': [],  # SQL queries don't have traditional sources
+                        'confidence': 0.9 if sql_result.get('success', False) else 0.5,
+                        'follow_up_questions': follow_up_questions,
+                        'context_used': False,
+                        'model_used': 'sql_query',
+                        'chunks_used': 0,
+                        'search_method': 'sql_query',
+                        'sql_query': sql_result.get('sql_queries', []),
+                        'result_count': sql_result.get('result_count', 0),
+                        'success': sql_result.get('success', False)
+                    }
+                except Exception as e:
+                    logger.error(f"Error in SQL query processing: {e}")
+                    # Return user-friendly error response instead of continuing to static processing
+                    return {
+                        'answer': "I'm sorry, I encountered an error processing your database query. Please try rephrasing your question or try again later.",
+                        'sources': [],
+                        'confidence': 0.0,
+                        'follow_up_questions': [
+                            "How does Polkadot's governance system work?",
+                            "What are the benefits of staking DOT tokens?",
+                            "How do parachains connect to Polkadot?"
+                        ],
+                        'context_used': False,
+                        'model_used': 'sql_query_error',
+                        'chunks_used': 0,
+                        'search_method': 'sql_error_fallback',
+                        'sql_query': [],
+                        'result_count': 0,
+                        'success': False
+                    }
+            
+            # Handle hybrid route (both static and dynamic)
+            logger.debug(f"Checking route_result_data_source: {route_result_data_source}, route: {route}")
+            if route_result_data_source == 'HYBRID':
+                logger.info("Hybrid route: Entering hybrid processing block")
+                # First, get dynamic/SQL response
+                dynamic_answer = None
+                dynamic_data_available = False
+                try:
+                    logger.info(f"Hybrid route: Executing SQL query for dynamic data. Query: {analyzed_query[:100]}, Table: {route_result_table}")
+                    sql_result = ask_question(analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
+                    dynamic_answer = sql_result.get('natural_response', '')
+                    dynamic_data_available = sql_result.get('success', False) and bool(dynamic_answer)
+                    logger.info(f"Hybrid route: SQL query completed. Success: {dynamic_data_available}, Response length: {len(dynamic_answer) if dynamic_answer else 0}, Result count: {sql_result.get('result_count', 0)}")
+                except Exception as e:
+                    logger.error(f"Error in hybrid SQL query processing: {e}", exc_info=True)
+                    dynamic_data_available = False
+                
+                # Then continue with static processing below (chunks already retrieved)
+                # The static answer will be combined with dynamic answer in the prompt
+                if dynamic_answer and dynamic_data_available:
+                    # Add dynamic answer to context for static processing
+                    analyzed_query = f"{analyzed_query}\n\nIMPORTANT: The user also requested specific data. Here is the dynamic data from the database:\n{dynamic_answer}\n\nPlease incorporate this data into your response along with the static context."
+                    logger.info(f"Hybrid route: Added dynamic data to query context. Dynamic answer preview: {dynamic_answer[:200]}")
+                elif not dynamic_data_available:
+                    logger.warning("Hybrid route: Dynamic data not available, proceeding with static only")
+            else:
+                logger.debug(f"Not hybrid route. route_result_data_source: {route_result_data_source}")
+            
+            # Continue with static data processing (existing logic)
+            # Note: analyzed_query is already available from the routing step above
+            
+            # Create context from chunks (increased length limit for large chunks)
+            try:
+                context = self.create_context_from_chunks(chunks, max_context_length=8000)
+                print("context from chunks", context)
+                print("context after strip", context.strip())
+            except Exception as context_error:
+                logger.error(f"Error creating context from chunks: {context_error}")
+                # Return error response if context creation fails
+                return {
+                    'answer': "I'm sorry, I encountered an error processing your request. Please try again.",
+                    'sources': [],
+                    'confidence': 0.0,
+                    'context_used': False,
+                    'model_used': 'error',
+                    'chunks_used': len(chunks),
+                    'follow_up_questions': [
+                        "How does Polkadot's governance system work?",
+                        "What are the benefits of staking DOT tokens?",
+                        "How do parachains connect to Polkadot?"
+                    ],
+                    'search_method': 'context_error'
+                }
+            
+            # Check if we have sufficient context
+            has_sufficient_context = (
+                context.strip() and 
+                len(chunks) > 0 and 
+                any(chunk.get('similarity_score', 0) > float(os.getenv("SIMILARITY_THRESHOLD")) for chunk in chunks)
+            )
+
+            # If no sufficient context, diagnose the specific issue
+            if not has_sufficient_context:
+                max_score = max([chunk.get('similarity_score', 0) for chunk in chunks]) if chunks else 0
+                has_good_similarity = any(chunk.get('similarity_score', 0) > 0.6 for chunk in chunks)
+                has_chunks = len(chunks) > 0
+                has_content = bool(context.strip())
+                
+                # Diagnose the specific problem
+                if not has_chunks:
+                    reason = "No relevant chunks found"
+                elif not has_good_similarity:
+                    reason = f"Low similarity scores (max: {max_score:.3f} < 0.6)"
+                elif not has_content:
+                    reason = f"Retrieved chunks contain no usable content (similarity: {max_score:.3f})"
+                else:
+                    reason = "Unknown context issue"
+                
+                logger.info(f"Insufficient context: {reason}. Query is outside knowledge boundary.")
+                
+                # Generate helpful follow-up questions for better guidance
+                follow_up_questions = [
+                    "How does Polkadot's governance system work?",
+                    "What are parachains and how do they connect to Polkadot?",
+                    "How can I stake DOT tokens on Polkadot?",
+                    "What is the difference between Polkadot and Kusama?"
+                ]
+                
+                return {
+                    'answer': "I couldn't find sufficient information to answer your question accurately. This query appears to be outside my knowledge boundary for Polkadot-related topics. Please try rephrasing your question or ask about a more specific Polkadot topic.",
+                    'sources': [],
+                    'confidence': 0.0,
+                    'context_used': False,
+                    'model_used': self.model,
+                    'chunks_used': len(chunks),
+                    'follow_up_questions': follow_up_questions,
+                    'search_method': 'insufficient_context',
+                    'max_similarity_score': max_score,
+                    'similarity_threshold': 0.6,
+                    'failure_reason': reason
+                }
+            
+            # If no context at all, return appropriate message
+            if not context.strip():
+                if self.enable_web_search:
+                    # This shouldn't happen since we would have used web search above
+                    return {
+                        'answer': "I couldn't find relevant information in the Polkadot knowledge base to answer your question. Please try rephrasing your query or ask about a different topic related to Polkadot.",
+                        'sources': [],
+                        'confidence': 0.0,
+                        'context_used': False,
+                        'search_method': 'local_only'
+                    }
+                else:
+                    return {
+                        'answer': "I could not find sufficient information about the query. Please try rephrasing your query or ask about a different topic related to Polkaseembly.",
+                        'sources': [],
+                        'confidence': 0.0,
+                        'context_used': False,
+                        'search_method': 'local_only'
+                    }
+            
+            # Get memory context if memory is enabled
+            memory_context = ""
+            try:
+                if self.memory_manager and self.memory_manager.enabled:
+                    memory_context = self.memory_manager.get_memory_context(analyzed_query, user_id)
+                    # Add analyzed query to memory
+                    self.memory_manager.add_user_query(analyzed_query, user_id)
+            except Exception as memory_error:
+                logger.warning(f"Error in memory operations: {memory_error}")
+                # Continue without memory context
+                memory_context = ""
+            
+            # Create system prompt
+            try:
+                system_prompt = custom_prompt or self._get_default_system_prompt()
+            except Exception as system_prompt_error:
+                logger.warning(f"Error creating system prompt: {system_prompt_error}")
+                system_prompt = "You are a helpful AI assistant for Polkadot-related questions."
+            
+            # Create user prompt with context, memory, and analyzed query
+            print("context before going to openAI prompt", context)
+            try:
+                user_prompt = self._create_user_prompt(analyzed_query, context, memory_context, conversation_history)
+            except Exception as user_prompt_error:
+                logger.error(f"Error creating user prompt: {user_prompt_error}")
+                # Return error response if prompt creation fails
+                return {
+                    'answer': "I'm sorry, I encountered an error preparing your request. Please try again.",
+                    'sources': [],
+                    'confidence': 0.0,
+                    'context_used': False,
+                    'model_used': 'error',
+                    'chunks_used': len(chunks),
+                    'follow_up_questions': [
+                        "How does Polkadot's governance system work?",
+                        "What are the benefits of staking DOT tokens?",
+                        "How do parachains connect to Polkadot?"
+                    ],
+                    'search_method': 'prompt_error'
+                }
+            
+            # Generate response using selected AI service (exclusive)
+            answer = None
+            openai_enabled = os.getenv("ENABLE_OPENAI", "").lower() == "true"
+            gemini_enabled = os.getenv("ENABLE_GEMINI", "").lower() == "true"
+            system_prompt = self._get_default_system_prompt()
+            
+            try:
+                if openai_enabled:
+                    # Use OpenAI exclusively
+                    print_model_usage("GPT-3.5-turbo", "response generation (static data)")
+                    logger.info("Using OpenAI for response generation")
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens
+                    )
+                    answer = response.choices[0].message.content
+                    logger.info("OpenAI response received successfully")
+                
+                elif gemini_enabled and self.gemini_client:
+                    # Use Gemini exclusively  
+                    model_name = getattr(self.gemini_client, 'model_name', 'Gemini')
+                    print_model_usage(f"{model_name}", "response generation (static data)")
+                    logger.info("Using Gemini for response generation")
+                    try:
+                        answer = self.gemini_client.get_response(system_prompt + "\n\n" + user_prompt)
+                        logger.info("Gemini response received successfully")
+                    except Exception as gemini_error:
+                        logger.warning(f"Gemini response failed: {gemini_error}. Falling back to OpenAI.")
+                        if self.client:
+                            print_model_usage(self.model, "response generation fallback after Gemini error")
+                            response = self.client.chat.completions.create(
+                                model=self.model,
+                                messages=[
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt}
+                                ],
+                                temperature=self.temperature,
+                                max_tokens=self.max_tokens
+                            )
+                            answer = response.choices[0].message.content
+                            logger.info("OpenAI fallback response received successfully after Gemini error")
+                        else:
+                            raise gemini_error
+                    
+                else:
+                    # Fallback to OpenAI if no service is enabled
+                    print_model_usage("GPT-3.5-turbo", "response generation fallback (static data)")
+                    logger.warning("No AI service explicitly enabled, falling back to OpenAI")
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens
+                    )
+                    answer = response.choices[0].message.content
+                    logger.info("OpenAI fallback response received successfully")
+            except Exception as llm_error:
+                if is_insufficient_quota_error(llm_error):
+                    logger.error(f"Insufficient quota error in LLM response generation: {llm_error}")
+                    return {
+                        'answer': get_quota_error_message(),
+                        'sources': [],
+                        'confidence': 0.0,
+                        'context_used': False,
+                        'model_used': 'error',
+                        'chunks_used': len(chunks),
+                        'follow_up_questions': [],
+                        'search_method': 'quota_error'
+                    }
+                logger.error(f"Error in LLM response generation: {llm_error}")
+                # Return a user-friendly error response
+                return {
+                    'answer': "I'm sorry, I'm having trouble processing your request right now. Please try again in a moment.",
+                    'sources': [],
+                    'confidence': 0.0,
+                    'context_used': False,
+                    'model_used': 'error',
+                    'chunks_used': len(chunks),
+                    'follow_up_questions': [
+                        "How does Polkadot's governance system work?",
+                        "What are the benefits of staking DOT tokens?",
+                        "How do parachains connect to Polkadot?"
+                    ],
+                    'search_method': 'error_fallback'
+                }
+            print("--------answer without strip-------\n", answer)
+            
+            # Clean any example.com URLs from the response
+            try:
+                answer = self.clean_example_urls(answer)
+                print("--------answer after cleaning example.com URLs-------\n", answer)
+            except Exception as clean_error:
+                logger.warning(f"Error cleaning URLs from response: {clean_error}")
+                # Continue with original answer
+            
+            # Add assistant response to memory if memory is enabled
+            try:
+                if self.memory_manager and self.memory_manager.enabled:
+                    self.memory_manager.add_assistant_response(answer, user_id)
+            except Exception as memory_error:
+                logger.warning(f"Error adding assistant response to memory: {memory_error}")
+                # Continue without memory update
+            
+            # Extract sources from chunks
+            try:
+                sources = self._extract_sources(chunks)
+            except Exception as source_error:
+                logger.warning(f"Error extracting sources: {source_error}")
+                sources = []
+            
+            # Estimate confidence based on number of chunks and similarity scores
+            try:
+                confidence = self._estimate_confidence(chunks)
+            except Exception as confidence_error:
+                logger.warning(f"Error estimating confidence: {confidence_error}")
+                confidence = 0.5  # Default confidence
+            
+            # Generate follow-up questions
+            try:
+                follow_up_questions = self._generate_follow_up_questions(query, chunks, answer)
+            except Exception as followup_error:
+                logger.warning(f"Error generating follow-up questions: {followup_error}")
+                follow_up_questions = [
+                    "How does Polkadot's governance system work?",
+                    "What are the benefits of staking DOT tokens?",
+                    "How do parachains connect to Polkadot?"
+                ]
+            
+            # Determine search method based on route
+            search_method = 'local_knowledge'
+            if route_result_data_source == 'HYBRID':
+                search_method = 'hybrid_static_and_dynamic'
+            elif route_result_data_source == 'STATIC':
+                search_method = 'static_embeddings'
+            
+            result = {
+                'answer': answer,
+                'sources': sources,
+                'confidence': confidence,
+                'follow_up_questions': follow_up_questions,
+                'context_used': True,
+                'model_used': self.model,
+                'chunks_used': len(chunks),
+                'search_method': search_method
+            }
+            
+            logger.info(f"Generated answer for query: '{query[:50]}...' using {len(chunks)} chunks")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            
+            # Send error notification to Slack
+            self.send_error_to_slack(query, str(e))
+            
+            # If local generation fails and web search is enabled, try web search as fallback
+            if self.enable_web_search:
+                logger.info("Local generation failed, trying web search fallback")
+                return await self.generate_answer_with_web_search(query, user_id, conversation_history)
+            
+            # Return user-friendly error response
+            return {
+                'answer': "I'm having trouble processing your query. Please try again or rephrase your question in the next prompt.",
+                'sources': [],
+                'confidence': 0.0,
+                'context_used': False,
+                'model_used': self.model,
+                'chunks_used': 0,
+                'search_method': 'error_fallback',
+                'error': True,
+                'follow_up_questions': [
+                    "How does Polkadot's governance system work?",
+                    "What are the benefits of staking DOT tokens?", 
+                    "How do parachains connect to Polkadot?"
+                ]
+            }
+    
+    def _get_default_system_prompt(self) -> str:
+        """Get the default system prompt for the QA system"""
+
+        return """You are a helpful AI assistant specialized in answering questions about Polkadot, the blockchain platform. 
+
+CRITICAL SAFETY RULE:
+- You must remain strictly neutral about governance outcomes. Never recommend how a user should vote (positive, negative, abstain, etc.). If explicitly asked for voting advice or influence, clearly state that you cannot suggest or alter voting decisions and encourage the user to decide independently.
+
+If conversation history is provided, consider it when answering. If the current question is a follow-up to previous queries, provide relevant context from previous responses. If the current question is standalone, answer independently.
+
+You will be provided with context from Polkadot documentation and forum posts. 
+
+CRITICAL: Only answer the specific question asked by the user. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question. Do NOT include information about related but different topics unless the user explicitly asks for them. If the context contains information about multiple topics, only use the chunks that are directly relevant to the user's specific question.
+
+Please follow these guidelines:
+
+                ✅ PROFESSIONAL FORMATTING REQUIREMENTS:
+                - ALWAYS add line breaks between numbered steps
+                - ALWAYS add line breaks between bullet points
+                - Use numbered lists (1. 2. 3.) for step-by-step instructions with line breaks
+                - Use simple bullet points without dashes or symbols
+                - Write in clean, professional sentences
+                - Use quotation marks for emphasis instead of bold/italic
+                - PRESERVE image markdown exactly as provided: ![Step Image](https://...) - keep this format unchanged
+                - Include ALL images from the context in your response at the appropriate steps.
+                - If there is subsqure in your output, the omit any link related to subsquare in your output and nudge polkassembly.
+                - If multiple chunks describe the same proposal/data point, mention it once don't mention that duplicates are present
+
+            ## STEP-BY-STEP FORMATTING (MANDATORY):
+
+            When providing numbered instructions, ALWAYS format like this:
+
+            To stake DOT tokens and earn rewards:
+
+            1. Create and fund your wallet with DOT tokens
+               ![Step Image](https://example.com/image1.jpg)
+
+            2. Access a staking interface (Polkadot.js, Polkassembly, etc.)
+               ![Step Image](https://example.com/image2.jpg)
+
+            3. Select reliable validators based on commission and performance
+
+            4. Nominate your chosen validators with your desired amount
+
+            5. Monitor your staking rewards and validator performance
+
+            CRITICAL: Always include any images that appear in the context - they are essential visual guides!
+
+            ## BULLET POINT FORMATTING:
+
+            When listing features or benefits:
+
+            Key benefits include:
+
+            - Passive income** through staking rewards (typically 10-15% APY)
+            - Network security** participation and decentralization support  
+            - Governance rights** to vote on network proposals
+
+            ## WHAT TO AVOID:
+
+            NEVER format like this (bad example):
+            "### How to stake DOT: 1. Create wallet 2. Select validators 3. Nominate tokens"
+            "Never use https://example.com/image1.jpg or https://example.com/image2.jpg, in your output, if there is such, then remove it in the output"
+            
+            **Remember**: Answer as if you have direct expertise about Polkadot. Start directly with content, use proper line breaks between steps, and provide helpful, accurate, and **professionally formatted** information."""
+    
+    def _create_user_prompt(self, query: str, context: str, memory_context: str = "", conversation_history: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Create the user prompt with query, context, memory, and conversation history"""
+        prompt_parts = []
+        
+        # Add conversation history if available
+        if conversation_history:
+            formatted_history = self._format_conversation_history(conversation_history)
+            prompt_parts.append(f"Conversation History:\n{formatted_history}")
+        
+        # Add memory context if available
+        if memory_context:
+            prompt_parts.append(f"Memory Context:\n{memory_context}")
+        
+        # Add current date context to handle relative time references
+        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+        prompt_parts.append(f"Current Date (UTC): {current_date}")
+
+        # Add document context
+        if context:
+            prompt_parts.append(f"Context Information:\n{context}")
+        
+        # Check if query contains dynamic data (for hybrid route)
+        if "IMPORTANT: The user also requested specific data" in query or "Dynamic Data Context:" in query:
+            prompt_parts.append("NOTE: This query requires both explaining concepts AND providing specific data. Make sure to include both the explanation from the context AND the specific data requested by the user.")
+        
+        prompt_parts.append(f"Current Question: {query}")
+        
+        prompt_parts.append("CRITICAL INSTRUCTIONS:\n- Answer ONLY the specific question asked. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question.\n- Do NOT include information about related but different topics unless explicitly asked.\n- If the context contains multiple topics, only use the chunks that are directly relevant to the specific question asked.\n- Answer the question directly without mentioning the context, sources, documentation, or previous conversations. Do not start with phrases like \"Based on the provided context\", \"According to the documentation\", \"From the Polkadot Wiki\", \"From our previous conversation\", etc. Simply provide the answer as if you have direct knowledge of the topic.\n\nCRITICAL FORMATTING REQUIREMENTS:\n- NEVER start with headers (##, ###)\n- Start directly with answer content\n- ALWAYS add line breaks between numbered steps (1. step one [LINE BREAK] 2. step two [LINE BREAK])\n- ALWAYS add line breaks between bullet points\n- Use professional markdown formatting throughout\n- IMPORTANT: Include all images from the context using exact markdown format: ![Step Image](url)")
+        
+        return "\n\n".join(prompt_parts)
+    
+    def _extract_sources(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Extract and filter source information from chunks"""
+        sources = []
+        seen_urls = set()
+        
+        # Sort chunks by similarity score
+        sorted_chunks = sorted(chunks, key=lambda x: x.get('similarity_score', 0), reverse=True)
+        
+        for chunk in sorted_chunks[:3]:
+            metadata = chunk.get('metadata', {})
+            
+            source = {
+                'title': metadata.get('title', 'Unknown Title'),
+                'url': metadata.get('url', ''),
+                'source_type': metadata.get('source', 'unknown'),
+                'similarity_score': chunk.get('similarity_score', 0.0)
+            }
+            
+            if source['url'] and source['url'] not in seen_urls:
+                sources.append(source)
+                seen_urls.add(source['url'])
+            elif not source['url'] and len(sources) < 2:
+                sources.append(source)
+            
+            if len(sources) >= 2 and any(s['url'] for s in sources):
+                break
+        
+        # Return sources without additional filtering (Bedrock guardrails handle content moderation)
+        return sources
+    
+    def _estimate_confidence(self, chunks: List[Dict[str, Any]]) -> float:
+        """Estimate confidence based on chunks and similarity scores"""
+        if not chunks:
+            return 0.0
+        
+        # Base confidence on average similarity score and number of chunks
+        similarity_scores = [chunk.get('similarity_score', 0.0) for chunk in chunks]
+        avg_similarity = sum(similarity_scores) / len(similarity_scores)
+        
+        # Adjust confidence based on number of chunks (more chunks = higher confidence, up to a point)
+        chunk_bonus = min(len(chunks) * 0.1, 0.3)
+        
+        confidence = min(avg_similarity + chunk_bonus, 1.0)
+        return round(confidence, 2)
+    
+    def generate_summary(self, chunks: List[Dict[str, Any]]) -> str:
+        """Generate a summary of the retrieved chunks"""
+        try:
+            if not chunks:
+                return "No relevant information found."
+            
+            # Create a condensed context
+            context = self.create_context_from_chunks(chunks, max_context_length=2000)
+            
+            summary_prompt = """Please provide a brief summary of the following Polkadot-related information using proper markdown formatting.
+
+IMPORTANT FORMATTING RULES:
+- DO NOT start with headers (##, ###)
+- Start directly with the summary content
+- Use **bold** for key terms, *italics* for technical concepts
+- Add line breaks between bullet points if used
+- Keep it concise and professional
+
+{context}
+
+Summary:"""
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": summary_prompt.format(context=context)}
+                ],
+                temperature=0.2,
+                max_tokens=300
+            )
+            
+            summary = response.choices[0].message.content.strip()
+            
+            # Clean any example.com URLs from the summary
+            summary = self.clean_example_urls(summary)
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return "Unable to generate summary."
+
+    def _generate_follow_up_questions(self, query: str, chunks: List[Dict[str, Any]], answer: str) -> List[str]:
+        """
+        Generate 2-3 follow-up questions based on the query, context, and answer
+        
+        Args:
+            query: Original user query
+            chunks: Retrieved chunks that were used
+            answer: Generated answer
+            
+        Returns:
+            List of follow-up questions
+        """
+        try:
+            # Extract key topics from chunks
+            topics = set()
+            for chunk in chunks[:3]:  # Only use top 3 chunks for topics
+                metadata = chunk.get('metadata', {})
+                title = metadata.get('title', '')
+                content = chunk.get('content', '')
+                
+                # Extract potential topics from titles and content
+                if title:
+                    topics.add(title.split(' - ')[0])  # Get main topic before dash
+                
+                # Look for common Polkadot-related terms
+                polkadot_terms = [
+                    'parachain', 'relay chain', 'governance', 'staking', 'validator',
+                    'nominator', 'treasury', 'referendum', 'proposal', 'council',
+                    'DOT', 'KSM', 'kusama', 'democracy', 'xcm', 'bridge',
+                    'consensus', 'runtime', 'substrate', 'crowdloan', 'auction'
+                ]
+                
+                content_lower = content.lower()
+                for term in polkadot_terms:
+                    if term.lower() in content_lower and term.lower() not in query.lower():
+                        topics.add(term)
+            
+            # Create context for follow-up generation
+            topics_list = list(topics)[:5]  # Limit to 5 most relevant topics
+            topics_str = ', '.join(topics_list) if topics_list else 'Polkadot ecosystem'
+            
+            # Generate follow-up questions using OpenAI
+            follow_up_prompt = f"""Based on this query: "{query}"
+And these related topics: {topics_str}
+
+Generate exactly 3 short, relevant follow-up questions that a user might want to ask next. Each question should:
+- Be directly related to the original query or mentioned topics
+- Be concise (under 15 words)
+- Explore different aspects or dive deeper
+- Be practical and useful
+
+Format: Return only the 3 questions, one per line, without numbers or bullets."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": follow_up_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=200
+            )
+            
+            follow_up_text = response.choices[0].message.content.strip()
+            
+            # Clean any example.com URLs from the follow-up questions
+            follow_up_text = self.clean_example_urls(follow_up_text)
+            
+            follow_up_questions = [q.strip() for q in follow_up_text.split('\n') if q.strip()]
+            
+            # Ensure we have 2-3 questions, fallback if needed
+            if len(follow_up_questions) < 2:
+                follow_up_questions = self._get_fallback_follow_ups(query)
+            elif len(follow_up_questions) > 3:
+                follow_up_questions = follow_up_questions[:3]
+            
+            return follow_up_questions
+            
+        except Exception as e:
+            logger.warning(f"Error generating follow-up questions: {e}")
+            return self._get_fallback_follow_ups(query)
+    
+    def _get_helpful_follow_ups(self) -> List[str]:
+        """Get helpful follow-up questions that guide users to appropriate topics"""
+        helpful_questions = [
+            "How does Polkadot's governance system work?",
+            "What are the benefits of staking DOT tokens?",
+            "How do parachains communicate with each other?",
+            "What makes Polkadot different from other blockchains?",
+            "How can I participate in Polkadot governance?",
+            "What are the risks and rewards of DOT staking?",
+        ]
+        
+        import random
+        return random.sample(helpful_questions, 3)
+
+    def _get_fallback_follow_ups(self, query: str) -> List[str]:
+        """
+        Get fallback follow-up questions based on common Polkadot topics
+        
+        Args:
+            query: Original user query
+            
+        Returns:
+            List of fallback follow-up questions
+        """
+        query_lower = query.lower()
+        
+        # Topic-based follow-ups
+        if any(term in query_lower for term in ['governance', 'vote', 'proposal', 'referendum']):
+            return [
+                "How do I participate in Polkadot governance?",
+                "What are the different governance tracks?",
+                "How does voting power work in OpenGov?"
+            ]
+        elif any(term in query_lower for term in ['staking', 'validator', 'nominator']):
+            return [
+                "What are the risks of staking DOT?",
+                "How do I choose good validators?",
+                "What is the minimum amount needed to stake?"
+            ]
+        elif any(term in query_lower for term in ['parachain', 'slot', 'auction']):
+            return [
+                "How do parachain auctions work?",
+                "What is the difference between parachains and parathreads?",
+                "How do parachains communicate with each other?"
+            ]
+        elif any(term in query_lower for term in ['dot', 'token', 'price', 'economics']):
+            return [
+                "What are the main uses of DOT token?",
+                "How does DOT inflation work?",
+                "Where can I buy and store DOT?"
+            ]
+        else:
+            # General follow-ups
+            return [
+                "How does Polkadot differ from other blockchains?",
+                "What are the main benefits of using Polkadot?",
+                "How can I get started with Polkadot?"
+            ]
