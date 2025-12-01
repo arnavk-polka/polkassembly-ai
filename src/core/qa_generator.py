@@ -402,62 +402,16 @@ class QAGenerator:
             last_year_str = (current_date.replace(month=1, day=1) - timedelta(days=1)).strftime("%Y")
             
             # Improved prompt with better structure and examples (with current date context)
-            analysis_prompt = f"""You are a query context analyzer. Today's date is {current_date_str} (UTC).
-Your job is to rewrite incomplete or contextual queries into complete, standalone queries ONLY when necessary.
-
-CONVERSATION HISTORY:
-{self._format_conversation_history(serializable_history)}
-
-CURRENT USER QUERY: "{query}"
-
-IMPORTANT: 
-- The CURRENT USER QUERY above is the actual query you should analyze
-- Do NOT use clarification questions from the conversation history as the query
-- Only use the conversation history to understand context for incomplete queries (e.g., "what about June?")
-- If the current user query already explicitly specifies the topic (e.g., mentions "Polkadot", "OpenGov", "treasury", etc.), you MUST leave it exactly as-is.
-- You are NOT allowed to invent new context like specific networks or frameworks unless the user explicitly mentioned them earlier in the conversation.
-
-INSTRUCTIONS:
-1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
-2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
-3. Preserve the user's intent and style
-4. Keep technical terms and column names consistent with previous queries
-5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
-6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
-7. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
-   - "this month" → "{current_month_str}"
-   - "last month" → "{last_month_str}"
-   - "today" → "{current_date_str}"
-   - "yesterday" → "{yesterday_str}"
-   - "last year" → "{last_year_str}"
-   - Never guess dates beyond what can be derived from today's date.
-
-EXAMPLES:
-
-Example 1:
-Previous: "Give me total number of referendums in July 2025"
-Current: "what about June?"
-Output: "Give me total number of referendums in June 2025"
-
-Example 2:
-Previous: "Show top 10 proposals by vote count"
-Current: "include their titles too"
-Output: "Show top 10 proposals with their titles by vote count"
-
-Example 3:
-Previous: "List all treasury proposals"
-Current: "filter for amount > 1000"
-Output: "List all treasury proposals with amount > 1000"
-
-Example 4:
-Current: "Show me all active referendums"
-Output: "Show me all active referendums" (unchanged - already complete)
-
-RESPONSE FORMAT:
-Return ONLY a JSON object with this exact structure:
-{{"analyzed_query": "your rewritten query here"}}
-
-No explanations, no markdown, just the JSON."""
+            from ..prompts.query_analysis_prompt import PROMPT_TEMPLATE
+            analysis_prompt = PROMPT_TEMPLATE.format(
+                current_date_str=current_date_str,
+                current_month_str=current_month_str,
+                last_month_str=last_month_str,
+                yesterday_str=yesterday_str,
+                last_year_str=last_year_str,
+                conversation_history=self._format_conversation_history(serializable_history),
+                query=query
+            )
 
             # Get analysis from OpenAI
             try:
@@ -604,50 +558,8 @@ No explanations, no markdown, just the JSON."""
         """
         import json
         
-        prompt = f"""You are a query classifier for a blockchain governance database. Determine which table to query.
-
-Query: "{query}"
-
-Tables:
-
-1. governance_data - Contains proposal information:
-   - Proposal details (title, content, description, status, type)
-   - Proposal metadata (dates, network, proposer)
-   - Financial data (amounts, beneficiaries, asset IDs)
-   - Proposal metrics (likes, comments)
-   - Examples:
-     * "Show me recent treasury proposals"
-     * "What's the status of proposal 123?"
-     * "Find proposals requesting more than 10000 DOT"
-     * "List all executed referendums"
-     * "Who proposed referendum 456?"
-     * "Show me proposals about topic X"
-
-2. voting_data - Contains voter activity and behavior:
-   - Voter accounts and addresses
-   - Vote decisions (Aye/Nay/Abstain)
-   - Voting power and locked amounts
-   - Conviction multipliers and lock periods
-   - Vote delegation
-   - Voting timestamps
-   - Examples:
-     * "How many people voted on proposal 123?"
-     * "Show me votes with 6x conviction"
-     * "Who voted Aye on referendum 456?"
-     * "List voters with >1000 DOT voting power"
-     * "Show delegated votes for proposal X"
-     * "What was voter Y's decision?"
-     * "Count unique voters in the last 30 days"
-
-Decision Rules:
-- If query asks about WHO voted, HOW people voted, VOTER behavior → voting_data
-- If query asks about WHAT proposals exist, proposal STATUS, proposal DETAILS → governance_data
-- If query mentions both, prioritize the main focus:
-  * "Show me voters who participated in treasury proposals" → voting_data (focus: voters)
-  * "Show me treasury proposals and their vote counts" → governance_data (focus: proposals)
-
-Respond with ONLY valid JSON:
-{{"table": "governance_data"}} or {{"table": "voting_data"}}"""
+        from ..prompts.table_classifier_prompt import PROMPT_TEMPLATE
+        prompt = PROMPT_TEMPLATE.format(query=query)
 
         try:
             # Try Gemini first (faster)
@@ -1189,69 +1101,8 @@ Respond with ONLY valid JSON:
     
     def _get_default_system_prompt(self) -> str:
         """Get the default system prompt for the QA system"""
-
-        return """You are a helpful AI assistant specialized in answering questions about Polkadot, the blockchain platform. 
-
-CRITICAL SAFETY RULE:
-- You must remain strictly neutral about governance outcomes. Never recommend how a user should vote (positive, negative, abstain, etc.). If explicitly asked for voting advice or influence, clearly state that you cannot suggest or alter voting decisions and encourage the user to decide independently.
-
-If conversation history is provided, consider it when answering. If the current question is a follow-up to previous queries, provide relevant context from previous responses. If the current question is standalone, answer independently.
-
-You will be provided with context from Polkadot documentation and forum posts. 
-
-CRITICAL: Only answer the specific question asked by the user. Use ONLY the relevant information from the retrieved chunks that directly addresses the user's question. Do NOT include information about related but different topics unless the user explicitly asks for them. If the context contains information about multiple topics, only use the chunks that are directly relevant to the user's specific question.
-
-Please follow these guidelines:
-
-                ✅ PROFESSIONAL FORMATTING REQUIREMENTS:
-                - ALWAYS add line breaks between numbered steps
-                - ALWAYS add line breaks between bullet points
-                - Use numbered lists (1. 2. 3.) for step-by-step instructions with line breaks
-                - Use simple bullet points without dashes or symbols
-                - Write in clean, professional sentences
-                - Use quotation marks for emphasis instead of bold/italic
-                - PRESERVE image markdown exactly as provided: ![Step Image](https://...) - keep this format unchanged
-                - Include ALL images from the context in your response at the appropriate steps.
-                - If there is subsqure in your output, the omit any link related to subsquare in your output and nudge polkassembly.
-                - If multiple chunks describe the same proposal/data point, mention it once don't mention that duplicates are present
-
-            ## STEP-BY-STEP FORMATTING (MANDATORY):
-
-            When providing numbered instructions, ALWAYS format like this:
-
-            To stake DOT tokens and earn rewards:
-
-            1. Create and fund your wallet with DOT tokens
-               ![Step Image](https://example.com/image1.jpg)
-
-            2. Access a staking interface (Polkadot.js, Polkassembly, etc.)
-               ![Step Image](https://example.com/image2.jpg)
-
-            3. Select reliable validators based on commission and performance
-
-            4. Nominate your chosen validators with your desired amount
-
-            5. Monitor your staking rewards and validator performance
-
-            CRITICAL: Always include any images that appear in the context - they are essential visual guides!
-
-            ## BULLET POINT FORMATTING:
-
-            When listing features or benefits:
-
-            Key benefits include:
-
-            - Passive income** through staking rewards (typically 10-15% APY)
-            - Network security** participation and decentralization support  
-            - Governance rights** to vote on network proposals
-
-            ## WHAT TO AVOID:
-
-            NEVER format like this (bad example):
-            "### How to stake DOT: 1. Create wallet 2. Select validators 3. Nominate tokens"
-            "Never use https://example.com/image1.jpg or https://example.com/image2.jpg, in your output, if there is such, then remove it in the output"
-            
-            **Remember**: Answer as if you have direct expertise about Polkadot. Start directly with content, use proper line breaks between steps, and provide helpful, accurate, and **professionally formatted** information."""
+        from ..prompts.default_system_prompt import PROMPT
+        return PROMPT
     
     def _create_user_prompt(self, query: str, context: str, memory_context: str = "", conversation_history: Optional[List[Dict[str, Any]]] = None) -> str:
         """Create the user prompt with query, context, memory, and conversation history"""
@@ -1338,18 +1189,8 @@ Please follow these guidelines:
             # Create a condensed context
             context = self.create_context_from_chunks(chunks, max_context_length=2000)
             
-            summary_prompt = """Please provide a brief summary of the following Polkadot-related information using proper markdown formatting.
-
-IMPORTANT FORMATTING RULES:
-- DO NOT start with headers (##, ###)
-- Start directly with the summary content
-- Use **bold** for key terms, *italics* for technical concepts
-- Add line breaks between bullet points if used
-- Keep it concise and professional
-
-{context}
-
-Summary:"""
+            from ..prompts.summary_prompt import PROMPT_TEMPLATE as summary_prompt_template
+            summary_prompt = summary_prompt_template.format(context=context)
             
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -1413,16 +1254,11 @@ Summary:"""
             topics_str = ', '.join(topics_list) if topics_list else 'Polkadot ecosystem'
             
             # Generate follow-up questions using OpenAI
-            follow_up_prompt = f"""Based on this query: "{query}"
-And these related topics: {topics_str}
-
-Generate exactly 3 short, relevant follow-up questions that a user might want to ask next. Each question should:
-- Be directly related to the original query or mentioned topics
-- Be concise (under 15 words)
-- Explore different aspects or dive deeper
-- Be practical and useful
-
-Format: Return only the 3 questions, one per line, without numbers or bullets."""
+            from ..prompts.follow_up_questions_prompt import PROMPT_TEMPLATE as follow_up_questions_template
+            follow_up_prompt = follow_up_questions_template.format(
+                query=query,
+                topics_str=topics_str
+            )
 
             response = self.client.chat.completions.create(
                 model=self.model,

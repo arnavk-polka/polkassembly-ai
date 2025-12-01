@@ -520,13 +520,14 @@ class Query2SQL:
     def _generate_sql_with_model_deterministic(self, system_prompt: str) -> str:
         """Generate SQL using deterministic settings (temperature=0, top_p=1, seed=42)"""
         try:
+            from ..prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
             if self.sql_model == 'chatgpt' and self.openai_client:
                 print_model_usage("GPT-4", "SQL generation (governance data, deterministic)")
                 logger.debug("Using ChatGPT for deterministic SQL generation")
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.0,
@@ -538,7 +539,8 @@ class Query2SQL:
             elif self.gemini_client:
                 print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (governance data, deterministic)")
                 logger.debug("Using Gemini for deterministic SQL generation")
-                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
+                full_prompt = f"""{sql_generation_system_prompt}
 
 {system_prompt}"""
                 try:
@@ -565,7 +567,7 @@ class Query2SQL:
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.0,
@@ -583,7 +585,7 @@ class Query2SQL:
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.0,
@@ -594,7 +596,8 @@ class Query2SQL:
                 return response.choices[0].message.content.strip()
             elif self.sql_model == 'chatgpt' and self.gemini_client:
                 logger.info("Falling back to Gemini for deterministic SQL generation")
-                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
+                full_prompt = f"""{sql_generation_system_prompt}
 
 {system_prompt}"""
                 response = self.gemini_client.get_response(full_prompt)
@@ -612,7 +615,7 @@ class Query2SQL:
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.1,
@@ -626,7 +629,8 @@ class Query2SQL:
                 logger.debug("Using Gemini for SQL generation")
                 
                 # Construct the full prompt for Gemini
-                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
+                full_prompt = f"""{sql_generation_system_prompt}
 
 {system_prompt}"""
                 
@@ -659,7 +663,7 @@ class Query2SQL:
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.1,
@@ -679,7 +683,7 @@ class Query2SQL:
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": sql_generation_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.1,
@@ -689,7 +693,8 @@ class Query2SQL:
             elif self.sql_model == 'chatgpt' and self.gemini_client:
                 # ChatGPT failed, try Gemini
                 logger.info("Falling back to Gemini 2.5 Pro for SQL generation")
-                full_prompt = f"""You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
+                full_prompt = f"""{sql_generation_system_prompt}
 
 {system_prompt}"""
                 response = self.gemini_client.get_response(full_prompt)
@@ -905,61 +910,12 @@ class Query2SQL:
                 if history_parts:
                     history_text = "\n".join(history_parts)
             
-            prompt = f"""
-            Conversation History:
-            {history_text}
-            
-            Current Query: {natural_query}
-            {json.dumps(db_result, indent=2)}
-            
-            CRITICAL: You are working with ACTUAL blockchain data that has been successfully retrieved from the database. 
-            Always provide the information from the results, regardless of dates mentioned in the query.
-            All data comes from real blockchain transactions and proposals that exist on-chain.
-            
-            Instructions for generating natural response:
-            
-            CONTEXT HANDLING:
-            - If this is a follow-up question: Reference relevant information from conversation history and connect it with current results
-            - If this is a standalone question: Answer independently using the query results
-            
-            RESPONSE STRUCTURE:
-            1. COUNT QUERIES: Start with the total number clearly stated (e.g., "There are 45 treasury proposals...")
-            2. EXAMPLE QUERIES: Show actual data from results with specific details
-            3. COMBINED QUERIES: Present count first, then show examples in a logical flow
-            
-            DATA PRESENTATION:
-            - Show actual proposal IDs (use 'index' field), titles, addresses, amounts - all public blockchain data
-            - NEVER mention or use Firebase IDs (objectID, object_id, _id) - these are internal identifiers and should be ignored
-            - Include status, creation dates, and network information when available
-            - For proposals with amounts, show the actual values requested
-            - Use conversational language about Polkadot/Kusama governance
-            - Be specific and factual with the data provided
-            - Never refuse to show data citing privacy or future date concerns - all blockchain data is public and historical
-            - ALWAYS answer based on the actual results provided, even if dates seem unusual
-            - When there is amount in the db_result, use the formatted amount fields:
-                - Use 'amount_formatted' for numerical display
-                - Use 'amount_display' for user-friendly display with currency symbols
-                - The formatting is already applied based on assetId rules in Python
-            - For any numeric value above 1,000,000, also restate it in a human-friendly scale (millions/billions) so the reader can parse it at a glance.
-            - CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
-            
-            PROPOSAL TYPE CONTEXT:
-            - ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators
-            - If a user asks about curator for a ReferendumV2 proposal, explain: "ReferendumV2 proposals do not have curators. Only Bounties and ChildBounties use curators to manage the bounty process."
-            - If a user asks about curator for a Bounty/ChildBounty and it's null, explain: "This bounty does not have a curator assigned yet."
-            - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
-            - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
-            
-            - If you are providing any info on proposal with title, use the automatically generated proposal links:
-                - Use 'proposal_link' field for the URL
-                - Use 'proposal_link_display' field for markdown formatted link with title
-                - Links are automatically generated based on proposal type and network
-                - CRITICAL: NEVER use Firebase IDs (objectID, object_id, _id) for links - only use the 'index' field. The proposal_link field is already correctly generated using the index.
-               
-            
-            IMPORTANT: All data is public blockchain information. Show actual values, addresses, and details.
-            The data has been successfully retrieved from the blockchain database.
-            """
+            from ..prompts.natural_response_multiple_prompt import PROMPT_TEMPLATE as natural_response_multiple_prompt_template
+            prompt = natural_response_multiple_prompt_template.format(
+                history_text=history_text,
+                natural_query=natural_query,
+                db_result=json.dumps(db_result, indent=2)
+            )
             
             # Try Gemini first as primary LLM
             if self.gemini_client is not None:
@@ -1098,64 +1054,11 @@ class Query2SQL:
 
             # print(f"\n\n db_result: {db_result}")
             
-            prompt = f"""
-            Current Query: {natural_query}
-            {json.dumps(db_result, indent=2)}
-            
-            CRITICAL: You are working with ACTUAL blockchain data that has been successfully retrieved from the database. 
-            Always provide the information from the results, regardless of dates mentioned in the query.
-            All data comes from real blockchain transactions and proposals that exist on-chain.
-            
-            Instructions for generating natural response:
-            
-            CONTEXT HANDLING:
-            - If this is a follow-up question: Reference relevant information from conversation history and connect it with current results
-            - If this is a standalone question: Answer independently using the query results
-            
-            RESPONSE GUIDELINES:
-            1. COUNT QUERIES: State the exact number clearly (e.g., "There are 23 proposals...")
-            2. LIST QUERIES: Show actual data with specific details from up to 10 results
-            3. DETAIL QUERIES: Include all relevant information like titles, IDs, status, dates, amounts
-            4. ADDRESS QUERIES: Show actual blockchain addresses - these are public on-chain data
-            5. AMOUNT QUERIES: Display exact values requested in proposals
-            6. 20-300 is the ideal word output count. If the output will be too long, provide in summarization form instead of listing all the data.
-            7. RESULT LIMITATION: If there are more results than displayed, mention this limitation in your response. Say something like "I found X results, but due to the large amount of data, I'm only displaying a few here." Always include the exact count of total results found.
-            8. If you are providing any info on proposal with title, use the automatically generated proposal links:
-                - Use 'proposal_link' field for the URL
-                - Use 'proposal_link_display' field for markdown formatted link with title
-                - Links are automatically generated based on proposal type and network
-                - CRITICAL: NEVER use Firebase IDs (objectID, object_id, _id) for links - only use the 'index' field. The proposal_link field is already correctly generated using the index.
-               
-            
-            DATA PRESENTATION:
-            - Use conversational language about Polkadot/Kusama governance
-            - Be specific and factual with all data provided
-            - Show actual proposal IDs (use 'index' field), titles, addresses, amounts - all public blockchain information
-            - NEVER mention or use Firebase IDs (objectID, object_id, _id) - these are internal identifiers and should be ignored
-            - Include network (Polkadot/Kusama), status, and creation dates when available
-            - Never refuse to show data citing privacy or future date concerns - all blockchain data is public and historical
-            - ALWAYS answer based on the actual results provided, even if dates seem unusual
-            - When there is amount in the db_result, use the formatted amount fields:
-                - Use 'amount_formatted' for numerical display
-                - Use 'amount_display' for user-friendly display with currency symbols
-                - The formatting is already applied based on assetId rules in Python
-            - CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
-            
-            PROPOSAL TYPE CONTEXT:
-            - ReferendumV2 proposals do NOT have curators - only Bounties and ChildBounties have curators
-            - If a user asks about curator for a ReferendumV2 proposal, explain: "ReferendumV2 proposals do not have curators. Only Bounties and ChildBounties use curators to manage the bounty process."
-            - If a user asks about curator for a Bounty/ChildBounty and it's null, explain: "This bounty does not have a curator assigned yet."
-            - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
-            - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
-
-            FOLLOW-UP ENGAGEMENT:
-            - At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. ONLY IF RELEVANT. This is optional and does not have to be done for every query.
-            - Make the suggestion conversational and contextually relevant to the data you just presented
-            - Examples: "Would you like more details about these proposals?" or "Would you like to explore similar proposals on Kusama?".
-            - Keep the follow-up suggestion brief (one sentence) and directly related to the query results
-
-            Focus on providing accurate, specific information from the query results. The data has been successfully retrieved from the blockchain database.
-            """
+            from ..prompts.natural_response_prompt import PROMPT_TEMPLATE as natural_response_prompt_template
+            prompt = natural_response_prompt_template.format(
+                natural_query=natural_query,
+                db_result=json.dumps(db_result, indent=2)
+            )
             
             # Debug: Log the results being passed to Gemini
             logger.info(f"Results being passed to Gemini for natural response: {summary_text[:500]}...")
@@ -1247,31 +1150,14 @@ class Query2SQL:
         sample_results_serialized = safe_serialize(sample_results)
         results_count = len(results)
         
-        validation_prompt = f"""Validate if the SQL query results match the user's question.
-
-User Question: "{natural_query}"
-
-Generated SQL Query:
-{sql_query}
-
-SQL Results:
-- Total rows returned: {results_count}
-- Sample results (first {len(sample_results)} rows):
-{json.dumps(sample_results_serialized, indent=2) if sample_results_serialized else "[]"}
-
-You must return ONLY valid JSON with these exact keys:
-{{
-    "verdict": "good" | "partial" | "bad" | "empty",
-    "reason": "short explanation (1-2 sentences)"
-}}
-
-Verdict Definitions:
-- "empty": The result set is empty or meaningless for answering the question (no relevant data found).
-- "good": Rows clearly match the question (right entity type, IDs, network, time range, metric as requested).
-- "partial": Rows are related but clearly missing important constraints (e.g., wrong time range, wrong network, missing filters that were requested).
-- "bad": Rows are clearly off-topic or conflicting with the question (wrong entity type, wrong IDs, completely unrelated data).
-
-Return ONLY the JSON object, no other text."""
+        from ..prompts.sql_validation_prompt import PROMPT_TEMPLATE as validation_prompt_template
+        validation_prompt = validation_prompt_template.format(
+            natural_query=natural_query,
+            sql_query=sql_query,
+            results_count=results_count,
+            sample_count=len(sample_results),
+            sample_results=json.dumps(sample_results_serialized, indent=2) if sample_results_serialized else "[]"
+        )
 
         try:
             # Use deterministic LLM call (temperature=0, top_p=1)
@@ -1288,7 +1174,8 @@ Return ONLY the JSON object, no other text."""
                 )
                 response_text = response.choices[0].message.content.strip()
             elif self.gemini_client:
-                full_prompt = f"""You are a SQL result validator. Return ONLY valid JSON with no additional text.
+                from ..prompts.sql_validator_system_prompt import PROMPT as sql_validator_system_prompt
+                full_prompt = f"""{sql_validator_system_prompt}
 
 {validation_prompt}"""
                 response_text = self.gemini_client.get_response(full_prompt).strip()
@@ -1499,33 +1386,11 @@ Return ONLY the JSON object, no other text."""
             if history_parts:
                 history_text = "\n".join(history_parts)
         
-        intent_prompt = f"""Extract structured intent from this natural language query about Polkadot/Kusama governance data.
-
-User Query: "{natural_query}"
-
-Conversation History:
-{history_text}
-
-You must return ONLY valid JSON with these exact keys:
-{{
-    "entity_type": "referenda" | "treasury_proposal" | "bounty" | "discussion" | "voter" | "delegate" | "unknown",
-    "network": "polkadot" | "kusama" | "both" | "unspecified",
-    "id": number or null,
-    "time_range": "last_30_days" | "last_90_days" | "all_time" | "unspecified",
-    "metric": "count" | "list" | "sum" | "avg" | "details",
-    "filters": "short free-text description of additional filters"
-}}
-
-Rules:
-- entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, discussions, voters, delegates, or unknown)
-- If the query mentions "discussion" or asks about a discussion post, use entity_type: "discussion. Also ref means referendum and referenda."
-- network: Extract network preference (polkadot, kusama, both, or unspecified if not mentioned)
-- id: Extract specific proposal/referendum ID if mentioned (number or null)
-- time_range: Extract time filter if mentioned (last_30_days, last_90_days, all_time, or unspecified)
-- metric: Determine what operation (count, list, sum, avg, or details for specific item)
-- filters: Brief description of any other filters (e.g., "status=active", "title contains X", "amount > Y")
-
-Return ONLY the JSON object, no other text."""
+        from ..prompts.intent_extraction_prompt import PROMPT_TEMPLATE as intent_prompt_template
+        intent_prompt = intent_prompt_template.format(
+            natural_query=natural_query,
+            history_text=history_text
+        )
 
         try:
             # Use deterministic LLM call (temperature=0, top_p=1)
@@ -1542,7 +1407,8 @@ Return ONLY the JSON object, no other text."""
                 )
                 response_text = response.choices[0].message.content.strip()
             elif self.gemini_client:
-                full_prompt = f"""You are a query intent extractor. Return ONLY valid JSON with no additional text.
+                from ..prompts.intent_extractor_system_prompt import PROMPT as intent_extractor_system_prompt
+                full_prompt = f"""{intent_extractor_system_prompt}
 
 {intent_prompt}"""
                 response_text = self.gemini_client.get_response(full_prompt).strip()
@@ -1734,210 +1600,19 @@ Return ONLY the JSON object, no other text."""
         if intent["id"] is not None:
             id_filter_instruction = f'\n- CRITICAL: Filter by ID: "index" = {intent["id"]} AND "index" IS NOT NULL'
         
-        base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries using the structured intent provided.
-
-STRUCTURED INTENT (use this as primary input):
-{intent_json_str}
-
-INTENT-BASED SQL GENERATION RULES:
-{network_filter_instruction}
-{time_filter_instruction}
-{metric_instruction}
-{id_filter_instruction}
-- Use intent.filters field only as additional WHERE conditions, not as free-form text
-- The intent.network field determines network filtering:
-  * If "polkadot" or "kusama": add WHERE filter for that network
-  * If "both" or "unspecified": do NOT filter by network
-- The intent.metric field determines SELECT/aggregation:
-  * "count": Use COUNT(*)
-  * "list": Use SELECT with LIMIT
-  * "sum": Use SUM() aggregation
-  * "avg": Use AVG() aggregation
-  * "details": Return full details for specific item
-- The intent.time_range field determines date filtering:
-  * "last_30_days": Filter to last 30 days
-  * "last_90_days": Filter to last 90 days
-  * "all_time" or "unspecified": No time filter
-
-CONVERSATION CONTEXT:
-Conversation history:
-{history_text}
-
-CRITICAL: URL HANDLING:
-- If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), extract the referenda/proposal ID and network:
-  * polkadot.polkassembly.io/referenda/1781 → referenda 1781 on Polkadot network
-  * kusama.polkassembly.io/referenda/123 → referenda 123 on Kusama network
-  * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
-- Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
-- URLs are HIGHLY SPECIFIC queries - no clarification needed
-- CRITICAL: Do NOT filter by "datasource" column based on URL domain - the datasource field may have different values or be NULL
-- Only use "index" and "source_network" to find the specific proposal from a URL
-
-CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
-- If the conversation history shows a pattern like:
-  1. User: [original question]
-  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
-  3. User: [short response like "polkadot", "kusama", "both"]
-- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
-- You MUST combine the original question (from message 1) with the clarification response (from message 3)
-- Examples:
-  * Original: "show me proposals" + Response: "polkadot" → "show me proposals on Polkadot network"
-  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
-  * Original: "summarize novawallet proposals" + Response: "polkadot" → "summarize novawallet proposals on Polkadot network"
-- Generate SQL based on the COMBINED understanding, not just the short clarification response
-
-If current query is a follow-up: Generate SQL that builds upon or references previous context
-If current query is standalone: Generate SQL independently
-Use your judgment to determine query relationships
-
-
-DATABASE SCHEMA:
-{self.table_schema}
-{governance_context}
-
-            CORE SQL GUIDELINES:
-            1. Use ONLY existing columns from the schema above
-            2. Table name: {self.table_name}
-            3. Use proper PostgreSQL syntax with double quotes for column names
-            4. Apply appropriate LIMIT clauses:
-               - Use LIMIT 1 for SINGULAR queries (e.g., "latest discussion", "the discussion", "a discussion", "one discussion")
-               - Use LIMIT 10 for PLURAL queries (e.g., "latest discussions", "some discussions", "discussions")
-               - No LIMIT for count/aggregate queries
-               - CRITICAL: If the query asks for "latest [entity]" (singular) or "the [entity]" or "a [entity]", use LIMIT 1
-            5. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values
-
-            DATA FILTERING RULES:
-            5. Network filtering: Use 'source_network' column (values: 'polkadot', 'kusama')
-            6. Proposal types: Use 'source_proposal_type' column
-            6a. CRITICAL: Map intent entity_type to source_proposal_type:
-                - entity_type "referenda" -> source_proposal_type = 'ReferendumV2'
-                - entity_type "treasury_proposal" -> source_proposal_type = 'TreasuryProposal'
-                - entity_type "bounty" -> source_proposal_type = 'Bounty'
-                - entity_type "discussion" -> source_proposal_type = 'Discussion'
-            7. Proposal IDs: Use 'index' column
-            8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
-            9. Text search: Use ILIKE for case-insensitive matching with % wildcards
-            10. Origin/Track filtering: Use 'onchaininfo_origin' column with EXACT match (=), NOT ILIKE
-               - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
-               - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
-               - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
-            11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
-               - The datasource field may have different values, be NULL, or not be a reliable filter
-               - For URL-based queries, only use "index" and "source_network" to find proposals
-               - Do NOT infer datasource filters from URL domains (e.g., polkassembly.io)
-            12. When you filter data by taking keywords from query itself. Some you can take from title, however see the
-                param supported in the DATABASE SCHEMA and use the nearest matching param. 
-                For example: 
-                -can you show me some treasury proposals currently in voting
-                -Don't use SELECT "title", "index", "onchaininfo_status", "createdat" FROM governance_data WHERE "source_proposal_type" ILIKE \'%treasury%\' AND "onchaininfo_status" = \'Voting\' LIMIT 10;
-                -Don't use "onchaininfo_status" = \'Voting\' since Voting is not in params, use nearest which can be "onchaininfo_status" = \'Deciding\'
-                -You can find all possible supported params in description of DATABSE SCHEMA.
-            13. CRITICAL STATUS VALUE MAPPING: Map user-friendly status terms to actual database values:
-                - For TREASURY PROPOSALS (source_proposal_type = 'TreasuryProposal'):
-                  * "executed" -> "Awarded" (treasury proposals use "Awarded" not "Executed")
-                  * "awarded" -> "Awarded"
-                  * "passed" -> "Awarded"
-                - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
-                  * "executed" -> "Executed"
-                  * "confirmed" -> "Confirmed"
-                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
-                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
-                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
-                - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
-                  * "executed" -> "Awarded" or "Claimed" (depending on context)
-                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted', 'Active', 'Added', 'Approved', 'CuratorUnassigned', 'CuratorAssigned', 'CuratorProposed', 'Proposed', 'Extended', 'Awarded')
-                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
-                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
-                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
-                
-                - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
-                - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
-                - Example: "Show active referenda" -> WHERE "source_proposal_type" = 'ReferendumV2' AND "onchaininfo_status" IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-
-
-            CRITICAL NULL VALUE HANDLING:
-            10. Many columns contain NULL values - ALWAYS add IS NOT NULL condition for any column used in filtering, ordering, or sorting
-            11. For amount queries (highest, lowest, etc.): ALWAYS add IS NOT NULL condition
-            12. For date-based queries: ALWAYS add IS NOT NULL for 'createdat' when filtering or ordering by date
-            13. For text searches: ALWAYS add IS NOT NULL for the column being searched
-            14. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "createdat" requires "createdat" IS NOT NULL)
-            15. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered
-            16. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL
-            17. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
-            
-            MANDATORY NULL HANDLING RULES:
-            - If you use a column in WHERE clause: add "column_name IS NOT NULL"
-            - If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
-            - If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
-            - If you use a column in HAVING clause: add "column_name IS NOT NULL"
-            - CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
-            - If a user asks for a specific field value (e.g., "who is the curator"), return the row even if that field is NULL
-            - The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
-            - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
-            - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
-
-            CRITICAL NaN VALUE HANDLING (MANDATORY FOR AMOUNT QUERIES):
-            - Some columns contain 'NaN' as a STRING value (not NULL) - these must be filtered out
-            - For ANY query involving "onchaininfo_beneficiaries_0_amount" (max, min, highest, lowest, average, sum, ordering, etc.):
-              YOU MUST ADD: AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
-            - For amount/numeric queries: ALWAYS add BOTH conditions: IS NOT NULL AND != 'NaN'
-            - When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
-            - MANDATORY EXAMPLE for amount queries: 
-              WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
-              AND "onchaininfo_beneficiaries_0_amount" != 'NaN' 
-              ORDER BY CAST("onchaininfo_beneficiaries_0_amount" AS FLOAT) DESC
-            - If you forget to add != 'NaN', the query will return rows with NaN values which are meaningless
-            
-            MULTIPLE QUERIES STRATEGY:
-            - If query asks for COUNT and EXAMPLES (like "how many proposals and name a few"), return 2 queries:
-              Query 1: COUNT query to get the total number
-              Query 2: SELECT query to get examples with details
-            - If query asks only for count, return 1 COUNT query
-            - If query asks only for examples/list, return 1 SELECT query
-            - Return queries as a JSON array: ["query1", "query2"]
-            
-            COLUMN SELECTION STRATEGY:
-            - For general queries: SELECT key columns like "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
-            - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
-            - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
-            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
-            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_address" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_address", "onchaininfo_beneficiaries_2_address", or "onchaininfo_beneficiaries_3_address" - these columns DO NOT EXIST and will cause SQL errors.
-            - CRITICAL: For ANY query filtering or ordering by "onchaininfo_beneficiaries_0_amount", you MUST add: 
-              AND "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
-              AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
-              Without the != 'NaN' check, queries will return meaningless NaN values.
-            
-            CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
-            - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
-            - "onchaininfo_reward": The REWARD amount for tips/bounties AND TreasuryProposals (treasury proposals use "onchaininfo_reward", NOT "onchaininfo_beneficiaries_0_amount")
-            - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
-            - For queries about tip/bounty rewards: USE "onchaininfo_reward"
-            - For TreasuryProposal queries about funds/amounts: USE "onchaininfo_reward" (treasury proposals don't have beneficiaries_0_amount populated)
-            - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
-            - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
-            
-            WINDOW FUNCTION FOR COUNT:
-            - When using LIMIT clause, ALWAYS include COUNT(*) OVER() as total_count to get the total number of matching records
-            - This allows showing "Found X results, displaying few" with accurate total count
-            - Example: SELECT "title", "index", "onchaininfo_status", COUNT(*) OVER() as total_count FROM table WHERE conditions ORDER BY createdat DESC LIMIT 10;
-            
-            ORDER BY NULL HANDLING EXAMPLE:
-            - WRONG: SELECT * FROM table WHERE conditions ORDER BY "createdat" DESC
-            - CORRECT: SELECT * FROM table WHERE conditions AND "createdat" IS NOT NULL ORDER BY "createdat" DESC
-            - ALWAYS add IS NOT NULL for the ORDER BY column in the WHERE clause
-            - ALTERNATIVE: Use NULLS LAST to push NULL values to bottom: ORDER BY "createdat" DESC NULLS LAST
-            
-            Very very Important Rule:
-            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum, Bounty, or Discussion.
-            - Valid proposal types: 'ReferendumV2', 'TreasuryProposal', 'Bounty', 'ChildBounty', 'FellowshipReferendum', 'Discussion', 'Tip', 'DemocracyProposal', 'CouncilMotion', 'Referendum', 'TechCommitteeProposal'
-            
-            Natural Language Query: {natural_query}
-            
-            SQL Query:
-            """
+        from ..prompts.sql_generation_with_intent_prompt import PROMPT_TEMPLATE as sql_generation_with_intent_template
+        base_system_prompt = sql_generation_with_intent_template.format(
+            intent_json_str=intent_json_str,
+            network_filter_instruction=network_filter_instruction,
+            time_filter_instruction=time_filter_instruction,
+            metric_instruction=metric_instruction,
+            id_filter_instruction=id_filter_instruction,
+            history_text=history_text,
+            table_schema=self.table_schema,
+            governance_context=governance_context,
+            table_name=self.table_name,
+            natural_query=natural_query
+        )
         
         for attempt in range(max_retries):
             try:
@@ -2006,239 +1681,13 @@ DATABASE SCHEMA:
                 history_text = "\n".join(history_parts)
         
         # Base system prompt
-        base_system_prompt = f"""You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries.
-
-CONVERSATION CONTEXT:
-Conversation history:
-{history_text}
-
-CRITICAL: URL HANDLING:
-- If the query is a URL (e.g., "http://polkadot.polkassembly.io/referenda/1781"), extract the referenda/proposal ID and network:
-  * polkadot.polkassembly.io/referenda/1781 → referenda 1781 on Polkadot network
-  * kusama.polkassembly.io/referenda/123 → referenda 123 on Kusama network
-  * polkadot.polkassembly.io/treasury/456 → treasury proposal 456 on Polkadot network
-- Generate SQL to fetch that specific proposal: WHERE "index" = [ID] AND "source_network" = '[network]'
-- URLs are HIGHLY SPECIFIC queries - no clarification needed
-- CRITICAL: Do NOT filter by "datasource" column based on URL domain - the datasource field may have different values or be NULL
-- Only use "index" and "source_network" to find the specific proposal from a URL
-
-CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
-- If the conversation history shows a pattern like:
-  1. User: [original question]
-  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
-  3. User: [short response like "polkadot", "kusama", "both"]
-- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
-- You MUST combine the original question (from message 1) with the clarification response (from message 3)
-- Examples:
-  * Original: "show me proposals" + Response: "polkadot" → "show me proposals on Polkadot network"
-  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
-  * Original: "summarize novawallet proposals" + Response: "polkadot" → "summarize novawallet proposals on Polkadot network"
-- Generate SQL based on the COMBINED understanding, not just the short clarification response
-
-If current query is a follow-up: Generate SQL that builds upon or references previous context
-If current query is standalone: Generate SQL independently
-Use your judgment to determine query relationships
-
-
-DATABASE SCHEMA:
-{self.table_schema}
-
-
-            CORE SQL GUIDELINES:
-            1. Use ONLY existing columns from the schema above
-            2. Table name: {self.table_name}
-            3. Use proper PostgreSQL syntax with double quotes for column names
-            4. Apply appropriate LIMIT clauses:
-               - Use LIMIT 1 for SINGULAR queries (e.g., "latest discussion", "the discussion", "a discussion", "one discussion")
-               - Use LIMIT 10 for PLURAL queries (e.g., "latest discussions", "some discussions", "discussions")
-               - No LIMIT for count/aggregate queries
-               - CRITICAL: If the query asks for "latest [entity]" (singular) or "the [entity]" or "a [entity]", use LIMIT 1
-            5. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values
-
-            DATA FILTERING RULES:
-            5. Network filtering: Use 'source_network' column (values: 'polkadot', 'kusama')
-            6. Proposal types: Use 'source_proposal_type' column
-            6a. CRITICAL: Map intent entity_type to source_proposal_type:
-                - entity_type "referenda" -> source_proposal_type = 'ReferendumV2'
-                - entity_type "treasury_proposal" -> source_proposal_type = 'TreasuryProposal'
-                - entity_type "bounty" -> source_proposal_type = 'Bounty'
-                - entity_type "discussion" -> source_proposal_type = 'Discussion'
-                - If query mentions "discussion" or "discussion post" -> source_proposal_type = 'Discussion'
-            7. Proposal IDs: Use 'index' column
-            8. Date filtering: Use DATE_TRUNC() for month/year, direct comparison for specific dates
-            9. Text search: Use ILIKE for case-insensitive matching with % wildcards
-            10. Origin/Track filtering: Use 'onchaininfo_origin' column with EXACT match (=), NOT ILIKE
-               - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
-               - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
-               - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
-            11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
-               - The datasource field may have different values, be NULL, or not be a reliable filter
-               - For URL-based queries, only use "index" and "source_network" to find proposals
-               - Do NOT infer datasource filters from URL domains (e.g., polkassembly.io)
-            12. When you filter data by taking keywords from query itself. Some you can take from title, however see the
-                param supported in the DATABASE SCHEMA and use the nearest matching param. 
-                For example: 
-                -can you show me some treasury proposals currently in voting
-                -Don't use SELECT "title", "index", "onchaininfo_status", "createdat" FROM governance_data WHERE "source_proposal_type" ILIKE \'%treasury%\' AND "onchaininfo_status" = \'Voting\' LIMIT 10;
-                -Don't use "onchaininfo_status" = \'Voting\' since Voting is not in params, use nearest which can be "onchaininfo_status" = \'Deciding\'
-                -You can find all possible supported params in description of DATABSE SCHEMA.
-            13. CRITICAL STATUS VALUE MAPPING: Map user-friendly status terms to actual database values:
-                - For TREASURY PROPOSALS (source_proposal_type = 'TreasuryProposal'):
-                  * "executed" -> "Awarded" (treasury proposals use "Awarded" not "Executed")
-                  * "awarded" -> "Awarded"
-                  * "passed" -> "Awarded"
-                - For REFERENDUMS (source_proposal_type = 'ReferendumV2' or 'Referendum'):
-                  * "executed" -> "Executed"
-                  * "confirmed" -> "Confirmed"
-                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
-                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
-                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
-                - For BOUNTIES (source_proposal_type = 'Bounty' or 'ChildBounty'):
-                  * "executed" -> "Awarded" or "Claimed" (depending on context)
-                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted', 'Active', 'Added', 'Approved', 'CuratorUnassigned', 'CuratorAssigned', 'CuratorProposed', 'Proposed', 'Extended', 'Awarded')
-                  * "voting" or "in voting" or "deciding" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-                  * "closed" or "not active" -> IN ('Cancelled', 'TimedOut', 'Confirmed', 'Approved', 'Rejected', 'Executed', 'Killed', 'ExecutionFailed')
-                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
-                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
-                - General status mappings:
-                  * "rejected" -> "Rejected"
-                  * "cancelled" -> "Cancelled"
-                  * "killed" -> "Killed"
-                  * "timed out" -> "TimedOut"
-                - CRITICAL: Treasury proposals use "Awarded" for executed/completed proposals, NOT "Executed"
-                - Example: "Show me executed treasury proposals" -> WHERE "source_proposal_type" = 'TreasuryProposal' AND "onchaininfo_status" = 'Awarded'
-                - Example: "Show active referenda" -> WHERE "source_proposal_type" = 'ReferendumV2' AND "onchaininfo_status" IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-
-
-            CRITICAL NULL VALUE HANDLING:
-            10. Many columns contain NULL values - ALWAYS add IS NOT NULL condition for any column used in filtering, ordering, or sorting
-            11. For amount queries (highest, lowest, etc.): ALWAYS add IS NOT NULL condition
-            12. For date-based queries: ALWAYS add IS NOT NULL for 'createdat' when filtering or ordering by date
-            13. For text searches: ALWAYS add IS NOT NULL for the column being searched
-            14. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "createdat" requires "createdat" IS NOT NULL)
-            15. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered
-            16. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL
-            17. Key columns with NULLs: amounts, addresses, vote metrics, dates, titles, content, createdat, etc.
-            
-            MANDATORY NULL HANDLING RULES:
-            - If you use a column in WHERE clause: add "column_name IS NOT NULL"
-            - If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
-            - If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
-            - If you use a column in HAVING clause: add "column_name IS NOT NULL"
-            - CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
-            - If a user asks for a specific field value (e.g., "who is the curator"), return the row even if that field is NULL
-            - The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
-            - Example: SELECT "onchaininfo_curator" FROM table WHERE "index" = 1671 (do NOT add "onchaininfo_curator IS NOT NULL" since it's only in SELECT)
-            - For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
-
-            CRITICAL NaN VALUE HANDLING (MANDATORY FOR AMOUNT QUERIES):
-            - Some columns contain 'NaN' as a STRING value (not NULL) - these must be filtered out
-            - For ANY query involving "onchaininfo_beneficiaries_0_amount" (max, min, highest, lowest, average, sum, ordering, etc.):
-              YOU MUST ADD: AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
-            - For amount/numeric queries: ALWAYS add BOTH conditions: IS NOT NULL AND != 'NaN'
-            - When ordering by numeric columns: Use CAST(column AS FLOAT) for proper numeric sorting
-            - MANDATORY EXAMPLE for amount queries: 
-              WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
-              AND "onchaininfo_beneficiaries_0_amount" != 'NaN' 
-              ORDER BY CAST("onchaininfo_beneficiaries_0_amount" AS FLOAT) DESC
-            - If you forget to add != 'NaN', the query will return rows with NaN values which are meaningless
-            
-            MULTIPLE QUERIES STRATEGY:
-            - If query asks for COUNT and EXAMPLES (like "how many proposals and name a few"), return 2 queries:
-              Query 1: COUNT query to get the total number
-              Query 2: SELECT query to get examples with details
-            - If query asks only for count, return 1 COUNT query
-            - If query asks only for examples/list, return 1 SELECT query
-            - Return queries as a JSON array: ["query1", "query2"]
-            
-            COLUMN SELECTION STRATEGY:
-            - For general queries: SELECT key columns like "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
-            - For searches: Focus on "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content"
-            - For FINANCIAL/AMOUNT queries: ALWAYS include "onchaininfo_beneficiaries_0_assetid" along with "onchaininfo_beneficiaries_0_amount". Both fields are must required at any cost.
-            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_amount" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_amount", "onchaininfo_beneficiaries_2_amount", or "onchaininfo_beneficiaries_3_amount" - these columns DO NOT EXIST and will cause SQL errors.
-            - CRITICAL: ONLY "onchaininfo_beneficiaries_0_address" EXISTS in the database. DO NOT use "onchaininfo_beneficiaries_1_address", "onchaininfo_beneficiaries_2_address", or "onchaininfo_beneficiaries_3_address" - these columns DO NOT EXIST and will cause SQL errors.
-            - CRITICAL: For ANY query filtering or ordering by "onchaininfo_beneficiaries_0_amount", you MUST add: 
-              AND "onchaininfo_beneficiaries_0_amount" IS NOT NULL 
-              AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
-              Without the != 'NaN' check, queries will return meaningless NaN values.
-            
-            CRITICAL: AMOUNT COLUMN SELECTION (onchaininfo_reward vs onchaininfo_beneficiaries_0_amount):
-            - "onchaininfo_beneficiaries_0_amount": The amount being SPENT/PAID OUT from the treasury to beneficiaries (for proposals, referenda, treasury spending, tracks like BigSpender/MediumSpender/SmallSpender)
-            - "onchaininfo_reward": The REWARD amount for tips/bounties AND TreasuryProposals (treasury proposals use "onchaininfo_reward", NOT "onchaininfo_beneficiaries_0_amount")
-            - For any query about spending, amounts paid out, or track spending limits: USE "onchaininfo_beneficiaries_0_amount"
-            - For queries about tip/bounty rewards: USE "onchaininfo_reward"
-            - For TreasuryProposal queries about funds/amounts: USE "onchaininfo_reward" (treasury proposals don't have beneficiaries_0_amount populated)
-            - Avoid SELECT * unless specifically needed - it causes long responses. Only use when somebody asks fro more info on proposals, referenda ID.
-            - But, if somebody ask, proposals in voting then also use other attributes such as DecisionDepositPlaced, Submitted, ConfirmStarted, ConfirmAborted along with Deciding.
-            
-            WINDOW FUNCTION FOR COUNT:
-            - When using LIMIT clause, ALWAYS include COUNT(*) OVER() as total_count to get the total number of matching records
-            - This allows showing "Found X results, displaying few" with accurate total count
-            - Example: SELECT "title", "index", "onchaininfo_status", COUNT(*) OVER() as total_count FROM table WHERE conditions ORDER BY createdat DESC LIMIT 10;
-            
-            ORDER BY NULL HANDLING EXAMPLE:
-            - WRONG: SELECT * FROM table WHERE conditions ORDER BY "createdat" DESC
-            - CORRECT: SELECT * FROM table WHERE conditions AND "createdat" IS NOT NULL ORDER BY "createdat" DESC
-            - ALWAYS add IS NOT NULL for the ORDER BY column in the WHERE clause
-            - ALTERNATIVE: Use NULLS LAST to push NULL values to bottom: ORDER BY "createdat" DESC NULLS LAST
-            
-            EXAMPLE QUERIES:
-            Single Query Examples:
-             - "http://polkadot.polkassembly.io/referenda/1781" or "polkadot.polkassembly.io/referenda/1781" -> SELECT "index", "title", "onchaininfo_status", "createdat", "content", "source_network", "source_proposal_type", "onchaininfo_proposer", "onchaininfo_reward", "onchaininfo_beneficiaries_0_amount", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "index" = 1781 AND "source_network" = 'polkadot' AND "index" IS NOT NULL AND "source_network" IS NOT NULL;
-             - "Show me recent proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Tell me about the latest discussion" -> SELECT "title", "index", "source_network", "createdat", "content" FROM {self.table_name} WHERE "source_proposal_type" = 'Discussion' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 1;
-             - "Find Kusama proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_network" = 'kusama' AND "source_network" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "What treasury proposals exist?" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_proposal_type" ILIKE '%treasury%' AND "source_proposal_type" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "how many funds has treasury given to polkassembly till date" -> SELECT SUM(CAST("onchaininfo_reward" AS FLOAT)) AS total_amount, COUNT(*) as proposal_count FROM {self.table_name} WHERE "source_proposal_type" = 'TreasuryProposal' AND ("title" ILIKE '%polkassembly%' OR "content" ILIKE '%polkassembly%') AND "onchaininfo_reward" IS NOT NULL AND "onchaininfo_reward" != 'NaN';
-             - "Tell me about clarys proposal" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("content" ILIKE '%clarys%' AND "content" IS NOT NULL) OR ("title" ILIKE '%clarys%' AND "title" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
-             - "Tell me about subsquare proposal" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("content" ILIKE '%subsquare%' AND "content" IS NOT NULL) OR ("title" ILIKE '%subsquare%' AND "title" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
-             - "Give me the details of the proposal with id 123456" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "index" = 123456 AND "index" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Give me some recent proposals" -> SELECT "title", "index", "onchaininfo_status", "createdat", "source_network", "source_proposal_type", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Give me proposals after 2024-01-01" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" > '2024-01-01' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Give me proposals before 2024-01-01" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" < '2024-01-01' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Give me proposals between dates" -> SELECT "title", "index", "onchaininfo_status", "createdat", "content", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "createdat" BETWEEN '2024-01-01' AND '2024-01-02' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
-             - "Count total proposals" -> SELECT COUNT(*) as total_proposals FROM {self.table_name};
-             - "Show me proposal amounts" -> SELECT "title", "onchaininfo_beneficiaries_0_assetid", "index", "onchaininfo_beneficiaries_0_amount", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL AND "onchaininfo_beneficiaries_0_amount" != 'NaN' ORDER BY "createdat" DESC LIMIT 10;
-             - "Show me all proposals ordered by date" -> SELECT "title", "index", "onchaininfo_status", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} ORDER BY "createdat" DESC NULLS LAST LIMIT 10;
-             - "Who is 0x163830..." or "What proposals did [address] make" -> Search across all address fields using ILIKE with partial match. Extract the address portion from query (e.g., "163830" from "0x163830...ah6") and search: SELECT "title", "index", "onchaininfo_proposer", "onchaininfo_status", "source_proposal_type", "createdat", "publicuser_username", "onchaininfo_beneficiaries_0_address", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("onchaininfo_proposer" ILIKE '%163830%' AND "onchaininfo_proposer" IS NOT NULL) OR ("onchaininfo_beneficiaries_0_address" ILIKE '%163830%' AND "onchaininfo_beneficiaries_0_address" IS NOT NULL) OR ("publicuser_addresses_0" ILIKE '%163830%' AND "publicuser_addresses_0" IS NOT NULL) OR ("publicuser_addresses_1" ILIKE '%163830%' AND "publicuser_addresses_1" IS NOT NULL) OR ("publicuser_addresses_2" ILIKE '%163830%' AND "publicuser_addresses_2" IS NOT NULL) OR ("publicuser_addresses_3" ILIKE '%163830%' AND "publicuser_addresses_3" IS NOT NULL) OR ("publicuser_addresses_4" ILIKE '%163830%' AND "publicuser_addresses_4" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
-            
-            Multiple Query Examples:
-            - "How many proposals in August 2025 and name a few?" -> ["SELECT COUNT(*) as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL;", "SELECT \"title\", \"index\", \"onchaininfo_status\", \"createdat\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL ORDER BY \"createdat\" DESC LIMIT 10;"]
-            - "How many Kusama proposals exist and show some examples?" -> ["SELECT COUNT(*) as kusama_count FROM {self.table_name} WHERE \"source_network\" = 'kusama' AND \"source_network\" IS NOT NULL;", "SELECT \"title\", \"index\", \"onchaininfo_status\", \"createdat\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE \"source_network\" = 'kusama' AND \"source_network\" IS NOT NULL ORDER BY \"createdat\" DESC LIMIT 10;"]
-            - "Summarize how many proposals has novawallet made till date and how much have they taken till date. Show me all the details" -> ["SELECT COUNT(*) AS total_proposals, SUM(CASE WHEN \"onchaininfo_reward\" IS NOT NULL AND \"onchaininfo_reward\" != 'NaN' THEN CAST(\"onchaininfo_reward\" AS FLOAT) WHEN \"onchaininfo_beneficiaries_0_amount\" IS NOT NULL AND \"onchaininfo_beneficiaries_0_amount\" != 'NaN' THEN CAST(\"onchaininfo_beneficiaries_0_amount\" AS FLOAT) ELSE 0 END) AS total_amount_received FROM {self.table_name} WHERE (\"title\" ILIKE '%novawallet%' OR \"content\" ILIKE '%novawallet%') AND \"title\" IS NOT NULL AND \"content\" IS NOT NULL;", "SELECT \"index\", \"title\", \"onchaininfo_status\", \"createdat\", \"source_network\", \"source_proposal_type\", COALESCE(\"onchaininfo_reward\", \"onchaininfo_beneficiaries_0_amount\") AS amount, \"onchaininfo_beneficiaries_0_assetid\" AS asset_id, \"onchaininfo_proposer\", \"onchaininfo_beneficiaries_0_address\" AS beneficiary_address, \"content\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE (\"title\" ILIKE '%novawallet%' OR \"content\" ILIKE '%novawallet%') AND \"title\" IS NOT NULL AND \"content\" IS NOT NULL AND \"createdat\" IS NOT NULL ORDER BY \"createdat\" DESC;"]
-            
-            Null Results
-            - Some columns has NULL and NaN values and for some queries like 
-            - tell me the proposal who had asked for highest amount in the month of august 2025, use NOT NULL and != NaN to get correct result. Do your own thinking and generate the query where NOT NULL and !=NaN is needed. Example:
-                    SELECT
-                        "title",
-                        "index",
-                        "onchaininfo_beneficiaries_0_assetid",
-                        "onchaininfo_beneficiaries_0_amount",
-                        "createdat"
-                    FROM
-                        governance_data
-                    WHERE
-                        DATE_TRUNC('month', "createdat") = '2025-08-01'
-                        AND "onchaininfo_beneficiaries_0_amount" IS NOT NULL
-                        AND "onchaininfo_beneficiaries_0_amount" != 'NaN'
-                    ORDER BY
-                        CAST("onchaininfo_beneficiaries_0_amount" AS FLOAT) DESC
-                    LIMIT 1;
-
-            - Columns with NULL/NaN values: ['publicuser_profiledetails_publicsociallinks_0_platform', 'history_1_title', 'linkedpost_indexorhash', 'tags_1_network', 'index', 'onchaininfo_votemetrics', 'hash', 'content', 'onchaininfo_beneficiaries_0_assetid', 'publicuser_addresses_3', 'userid', 'history_0_title', 'onchaininfo_prepareperiodendsat', 'history_2_createdat_seconds', 'tags_0_network', 'publicuser_addresses_2', 'topic', 'onchaininfo_proposer', 'history_2_content', 'poll', 'publicuser_profiledetails_title', 'publicuser_profiledetails_publicsociallinks_0_url', 'onchaininfo_index', 'history_1_createdat_nanoseconds', 'onchaininfo_beneficiaries_0_amount', 'history_1_content', 'onchaininfo_votemetrics_bareayes_value', 'publicuser_profilescore', 'onchaininfo_decisionperiodendsat', 'history_0_content', 'tags_0_lastusedat', 'tags_2_lastusedat', 'tags_2_value', 'id', 'tags_1_value', 'history_0_createdat_seconds', 'updatedat', 'onchaininfo_origin', 'publicuser_profiledetails_coverimage', 'onchaininfo_votemetrics_nay_count', 'onchaininfo_votemetrics_aye_count', 'createdat', 'history_2_title', 'onchaininfo_votemetrics_aye_value', 'publicuser_profiledetails_bio', 'history_0_createdat_nanoseconds', 'publicuser_profiledetails_image', 'linkedpost_proposaltype', 'onchaininfo_beneficiaries_0_address', 'publicuser_addresses_0', 'publicuser_rank', 'tags_1_lastusedat', 'tags_0_value', 'publicuser_addresses_1', 'onchaininfo_votemetrics_nay_value', 'onchaininfo_votemetrics_support_value', 'onchaininfo_hash', 'onchaininfo_reward', 'publicuser_id', 'onchaininfo_description', 'publicuser_addresses_4', 'history_1_createdat_seconds', 'onchaininfo_curator', 'history_2_createdat_nanoseconds', 'publicuser_createdat', 'publicuser_username', 'tags_2_network']
-
-            Very very Important Rule:
-            - For every query you generate, you must add a filter of source_proposal_type = 'ReferendumV2' unless, otherwise, specified that somebody needs info on ChildBounty, FellowshipReferendum, Bounty, or Discussion.
-            - If the query mentions "discussion" or asks about discussion posts, use source_proposal_type = 'Discussion' instead of 'ReferendumV2'.
-            - Valid proposal types: 'ReferendumV2', 'TreasuryProposal', 'Bounty', 'ChildBounty', 'FellowshipReferendum', 'Discussion', 'Tip', 'DemocracyProposal', 'CouncilMotion', 'Referendum', 'TechCommitteeProposal'
-            
-            Natural Language Query: {natural_query}
-            
-            SQL Query:
-            """
+        from ..prompts.sql_generation_without_intent_prompt import PROMPT_TEMPLATE as sql_generation_without_intent_template
+        base_system_prompt = sql_generation_without_intent_template.format(
+            history_text=history_text,
+            table_schema=self.table_schema,
+            table_name=self.table_name,
+            natural_query=natural_query
+        )
         
         last_error = None
         last_sql_queries = None
@@ -2660,7 +2109,8 @@ class VoteQuery2SQL:
                 logger.debug("Using Gemini for voting SQL generation")
                 
                 # Construct the full prompt for Gemini
-                full_prompt = f"""You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.voting_sql_system_prompt import PROMPT as voting_sql_system_prompt
+                full_prompt = f"""{voting_sql_system_prompt}
 
 {system_prompt}"""
                 
@@ -2692,12 +2142,13 @@ class VoteQuery2SQL:
                 
             if self.openai_client:
                 # Fallback to OpenAI if Gemini fails
+                from ..prompts.voting_sql_system_prompt import PROMPT as voting_sql_system_prompt
                 print_model_usage("GPT-4", "SQL generation fallback (voting data)")
                 logger.debug("Using ChatGPT as fallback for voting SQL generation")
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": voting_sql_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.1,
@@ -2713,11 +2164,12 @@ class VoteQuery2SQL:
             # Try fallback model
             if self.sql_model != 'chatgpt' and self.openai_client:
                 # Gemini failed, try ChatGPT
+                from ..prompts.voting_sql_system_prompt import PROMPT as voting_sql_system_prompt
                 logger.info("Falling back to ChatGPT for voting SQL generation")
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4",
                     messages=[
-                        {"role": "system", "content": "You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
+                        {"role": "system", "content": voting_sql_system_prompt},
                         {"role": "user", "content": system_prompt}
                     ],
                     temperature=0.1,
@@ -2727,7 +2179,8 @@ class VoteQuery2SQL:
             elif self.sql_model == 'chatgpt' and self.gemini_client:
                 # ChatGPT failed, try Gemini
                 logger.info("Falling back to Gemini 2.5 Pro for voting SQL generation")
-                full_prompt = f"""You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format.
+                from ..prompts.voting_sql_system_prompt import PROMPT as voting_sql_system_prompt
+                full_prompt = f"""{voting_sql_system_prompt}
 
 {system_prompt}"""
                 response = self.gemini_client.get_response(full_prompt)
@@ -2824,48 +2277,15 @@ class VoteQuery2SQL:
                     context_info = f"Previous conversation topics: {'; '.join(recent_topics)}"
             
             # Create context for the AI to generate response
-            context_prompt = f"""
-            Convert these voting query results into a natural, conversational response.
-            
-            Original Question: {natural_query}
-            SQL Query: {sql_query}
-            
-            Results Summary: {results_summary}
-            Columns: {columns}
-            Sample Data: {sample_data}
-            
-            {context_info}
-            
-            RESPONSE STYLE GUIDELINES:
-            1. BE CONCISE: Give direct, to-the-point answers unless the question specifically asks for detailed analysis
-            2. ANSWER FIRST: Start with the direct answer to the user's question
-            3. MINIMAL CONTEXT: Only add insights/context if:
-               - The user explicitly asks for analysis or insights
-               - The conversation history shows they want detailed explanations
-               - The question is complex and requires context to understand
-            4. AVOID SPECULATION: Don't add "could suggest" or "might indicate" unless specifically asked for analysis
-            5. NUMBERS: Present key numbers clearly but don't over-explain their significance unless asked
-            6. RESULT LIMITATION: If there are more results than displayed, mention this limitation in your response. Say something like "I found X voting records, but due to the large amount of data, I'm only displaying a few here." Always include the exact count of total results found.
-            7. If you receive proposal_index in result. Then you should must make a link like below:
-                - https://polkadot.polkassembly.io/referenda/{{proposal_index}} 
-            8. When you receive voting self_voting_power, then always remove 9 zero from it. For ex: 10000000000 becomes 1 DOT. DOT is the unit here.
-            9. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like "this value was null" or "this field is NaN" - just skip those fields entirely.
-            10. FOLLOW-UP ENGAGEMENT: At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. Make the suggestion conversational and contextually relevant to the data you just presented. Examples: "Would you like to see details about this proposal?" or "Would you like to explore voting patterns for other proposals?" Keep it brief (one sentence) and directly related to the query results. This is optional and does not have to be done for every query.
-               
-            
-            EXAMPLES:
-            - Question: "Show me the no of referenda in july 2025?" 
-              Good: "There were 40 referenda created in April 2025. Would you like to see more details about each referenda?"
-              Bad: "The proposal that received the highest number of votes... This indicates... It's interesting to note..."
-
-              - Question: "Analyze voting patterns for treasury proposals"
-              Good: [Longer response with analysis since "analyze" was requested]
-            
-            - Question: "How many votes did referenda 1728 recieve till now?"
-              Good: "Referenda 1728 has received 1000 votes till now. Would you like to see more details about the referenda?`"
-            
-            Response:
-            """
+            from ..prompts.voting_natural_response_prompt import PROMPT_TEMPLATE as voting_natural_response_template
+            context_prompt = voting_natural_response_template.format(
+                natural_query=natural_query,
+                sql_query=sql_query,
+                results_summary=results_summary,
+                columns=columns,
+                sample_data=sample_data,
+                context_info=context_info
+            )
             
             # Trim prompt to fit token limits
             context_prompt = self.trim_prompt_to_fit_tokens(context_prompt)
@@ -2875,7 +2295,8 @@ class VoteQuery2SQL:
                 try:
                     print_model_usage(f"{GEMINI_MODEL_NAME}", "natural response generation (voting data)")
                     logger.info("Using Gemini as primary LLM for voting natural response generation")
-                    system_prompt = "You are a helpful assistant that provides concise, direct answers about voting data. Be brief and to-the-point unless the user specifically asks for detailed analysis or insights. Start with the direct answer, then add context only if needed. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."
+                    from ..prompts.voting_natural_response_system_prompt import PROMPT as voting_natural_response_system_prompt
+                    system_prompt = voting_natural_response_system_prompt
                     full_prompt = system_prompt + "\n\n" + context_prompt
                     # Use GEMINI_MODEL_NAME for natural response generation
                     natural_response_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
@@ -2893,7 +2314,8 @@ class VoteQuery2SQL:
                         try:
                             print_model_usage(f"{GEMINI_MODEL_NAME}", "natural response generation fallback (voting data)")
                             fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
-                            system_prompt = "You are a helpful assistant that provides concise, direct answers about voting data. Be brief and to-the-point unless the user specifically asks for detailed analysis or insights. Start with the direct answer, then add context only if needed. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."
+                            from ..prompts.voting_natural_response_system_prompt import PROMPT as voting_natural_response_system_prompt
+                            system_prompt = voting_natural_response_system_prompt
                             full_prompt = system_prompt + "\n\n" + context_prompt
                             natural_response = fallback_client.get_response(full_prompt)
                             logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting natural response generation")
@@ -2907,12 +2329,13 @@ class VoteQuery2SQL:
                         logger.warning(f"Gemini failed for voting natural response, falling back to OpenAI: {gemini_error}")
             
             # Fallback to OpenAI
+            from ..prompts.voting_natural_response_system_prompt import PROMPT as voting_natural_response_system_prompt
             print_model_usage("GPT-4", "natural response generation fallback (voting data)")
             logger.info("Using OpenAI for voting natural response generation (fallback)")
             response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that provides concise, direct answers about voting data. Be brief and to-the-point unless the user specifically asks for detailed analysis or insights. Start with the direct answer, then add context only if needed. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."},
+                    {"role": "system", "content": voting_natural_response_system_prompt},
                     {"role": "user", "content": context_prompt}
                 ],
                 temperature=0.2,
@@ -2931,64 +2354,12 @@ class VoteQuery2SQL:
 
     def _generate_sql_queries_only_voting(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> List[str]:
         """Generate SQL queries for voting data without executing them"""
-        base_system_prompt = f"""
-You are a PostgreSQL expert specializing in voting data analysis. Convert natural language queries into optimized SQL queries for voting data.
-
-DATABASE SCHEMA:
-Main Table: {self.table_name}
-{self.table_schema}
-
-Related Table: conviction_vote
-- Contains "self_voting_power" (voting power/balance for each vote)
-- Joined via "parent_vote_id" (foreign key in {self.table_name}) → "id" (primary key in conviction_vote)
-
-CORE SQL GUIDELINES:
-1. Use ONLY existing columns from the schema above.
-2. Main table name: {self.table_name}
-3. Use proper PostgreSQL syntax with double quotes for column names.
-4. Apply appropriate LIMIT clauses (typically 10 for lists; no LIMIT for counts/aggregates).
-5. Always order explicitly when returning recent items (e.g., ORDER BY main."created_at" DESC).
-6. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values.
-
-JOIN REQUIREMENTS:
-6. When querying voting power/balance, JOIN with conviction_vote table:
-   FROM {self.table_name} AS main
-   LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-7. Use "cv.self_voting_power" for all voting power queries (replaces "balance").
-8. Always use table aliases (main, cv) to avoid ambiguity.
-
-VOTING DATA SPECIFIC RULES:
-9. Voter information: Use "main.voter".
-10. Proposal identification: Use "main.proposal_index" or "main.proposal_id" for proposal/referendum IDs.
-11. Voting decisions: Use "main.decision" (values like 'aye', 'nay', 'abstain' — case-insensitive compare with ILIKE when needed).
-12. Voting power: Use "cv.self_voting_power" (FLOAT). When querying voting power, always include the JOIN with conviction_vote.
-13. Delegation: Use "main.is_delegated" (BOOLEAN) and "main.delegated_to" for target account.
-14. Date filtering: Use "main.created_at" for when the vote was cast; use "main.removed_at" to exclude revoked/invalidated votes (e.g., WHERE main."removed_at" IS NULL for "active" votes).
-15. Proposal types: Use "main.type" (e.g., 'ReferendumV2', 'Treasury', 'Fellowship').
-16. Lock period / conviction: Use "main.lock_period" for conviction or lock-time–related queries.
-
-CRITICAL NULL VALUE HANDLING:
-17. Many columns may be NULL — ALWAYS add IS NOT NULL for any column used in filtering, ordering, or sorting.
-18. For voting power queries: ALWAYS add "cv.self_voting_power IS NOT NULL" and include JOIN with conviction_vote.
-19. For date-based queries: ALWAYS add "main.created_at IS NOT NULL" when filtering or ordering by date.
-20. For text searches: ALWAYS add IS NOT NULL for the column being searched.
-21. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "created_at" requires "created_at" IS NOT NULL).
-22. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered.
-23. When filtering by proposal or voter: ALWAYS add "main.proposal_index IS NOT NULL" and/or "main.voter IS NOT NULL".
-24. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL.
-
-MULTIPLE QUERIES STRATEGY:
-- If the user asks for COUNT and EXAMPLES (e.g., "how many voters and show some"), return 2 queries:
-  • Query 1: COUNT query to get the total number
-  • Query 2: SELECT query to get examples with details
-- If the user asks only for a count, return 1 COUNT query.
-- If the user asks only for a list/examples, return 1 SELECT query.
-- Return queries as a JSON array: ["query1", "query2"].
-
-Natural Language Query: {natural_query}
-
-SQL Query:
-"""
+        from ..prompts.voting_sql_generation_prompt import PROMPT_TEMPLATE as voting_sql_generation_template
+        base_system_prompt = voting_sql_generation_template.format(
+            table_name=self.table_name,
+            table_schema=self.table_schema,
+            natural_query=natural_query
+        )
         
         for attempt in range(max_retries):
             try:
@@ -3149,187 +2520,13 @@ SQL Query:
                 history_text = "\n".join(history_parts)
         
         # Base system prompt for voting data
-        base_system_prompt = f"""
-You are a PostgreSQL expert specializing in voting data analysis. Convert natural language queries into optimized SQL queries for voting data.
-
-CONVERSATION CONTEXT:
-Conversation history:
-{history_text}
-
-CRITICAL: UNDERSTANDING CLARIFICATION RESPONSES:
-- If the conversation history shows a pattern like:
-  1. User: [original question]
-  2. Assistant: [clarification question, e.g., "Are you looking for proposals on the Polkadot or Kusama network?"]
-  3. User: [short response like "polkadot", "kusama", "both"]
-- Then the current query is a CLARIFICATION RESPONSE, not a standalone query
-- You MUST combine the original question (from message 1) with the clarification response (from message 3)
-- Examples:
-  * Original: "show me votes" + Response: "polkadot" → "show me votes on Polkadot network"
-  * Original: "how many voters" + Response: "both" → "how many voters on both Polkadot and Kusama networks"
-- Generate SQL based on the COMBINED understanding, not just the short clarification response
-
-DATABASE SCHEMA:
-Main Table: {self.table_name}
-{self.table_schema}
-
-Related Table: conviction_vote
-- Contains "self_voting_power" (voting power/balance for each vote)
-- Joined via "parent_vote_id" (foreign key in {self.table_name}) → "id" (primary key in conviction_vote)
-
-CORE SQL GUIDELINES:
-1. Use ONLY existing columns from the schema above.
-2. Main table name: {self.table_name}
-3. Use proper PostgreSQL syntax with double quotes for column names.
-4. Apply appropriate LIMIT clauses (typically 10 for lists; no LIMIT for counts/aggregates).
-5. Always order explicitly when returning recent items (e.g., ORDER BY main."created_at" DESC).
-6. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL" to avoid NULL values.
-
-JOIN REQUIREMENTS:
-6. When querying voting power/balance, JOIN with conviction_vote table:
-   FROM {self.table_name} AS main
-   LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-7. Use "cv.self_voting_power" for all voting power queries (replaces "balance").
-8. Always use table aliases (main, cv) to avoid ambiguity.
-
-VOTING DATA SPECIFIC RULES:
-9. Voter information: Use "main.voter".
-10. Proposal identification: Use "main.proposal_index" or "main.proposal_id" for proposal/referendum IDs.
-11. Voting decisions: Use "main.decision" (values like 'aye', 'nay', 'abstain' — case-insensitive compare with ILIKE when needed).
-12. Voting power: Use "cv.self_voting_power" (FLOAT). When querying voting power, always include the JOIN with conviction_vote.
-13. Delegation: Use "main.is_delegated" (BOOLEAN) and "main.delegated_to" for target account.
-14. Date filtering: Use "main.created_at" for when the vote was cast; use "main.removed_at" to exclude revoked/invalidated votes (e.g., WHERE main."removed_at" IS NULL for "active" votes).
-15. Proposal types: Use "main.type" (e.g., 'ReferendumV2', 'Treasury', 'Fellowship').
-16. Lock period / conviction: Use "main.lock_period" for conviction or lock-time–related queries.
-
-CRITICAL NULL VALUE HANDLING:
-17. Many columns may be NULL — ALWAYS add IS NOT NULL for any column used in filtering, ordering, or sorting.
-18. For voting power queries: ALWAYS add "cv.self_voting_power IS NOT NULL" and include JOIN with conviction_vote.
-19. For date-based queries: ALWAYS add "main.created_at IS NOT NULL" when filtering or ordering by date.
-20. For text searches: ALWAYS add IS NOT NULL for the column being searched.
-21. For ordering/sorting: ALWAYS add IS NOT NULL for the column being ordered by (e.g., ORDER BY "created_at" requires "created_at" IS NOT NULL).
-22. For any WHERE conditions: ALWAYS add IS NOT NULL for the column being filtered.
-23. When filtering by proposal or voter: ALWAYS add "main.proposal_index IS NOT NULL" and/or "main.voter IS NOT NULL".
-24. IMPORTANT: Do NOT add IS NOT NULL for columns ONLY in SELECT clause - return rows even if those fields are NULL.
-
-MANDATORY NULL HANDLING RULES FOR VOTING DATA:
-- If you use a column in WHERE clause: add "column_name IS NOT NULL"
-- If you use a column in ORDER BY clause: add "column_name IS NOT NULL" OR use "NULLS LAST"
-- If you use a column in GROUP BY clause: add "column_name IS NOT NULL"
-- If you use a column in HAVING clause: add "column_name IS NOT NULL"
-- CRITICAL: Do NOT add "IS NOT NULL" for columns that are ONLY in SELECT clause
-- If a user asks for a specific field value, return the row even if that field is NULL
-- The LLM can handle NULL values in responses - return the data and let it explain if a field is missing
-- For ORDER BY: Prefer "IS NOT NULL" in WHERE clause, but if you must include NULLs, use "NULLS LAST"
-
-MULTIPLE QUERIES STRATEGY:
-- If the user asks for COUNT and EXAMPLES (e.g., "how many voters and show some"), return 2 queries:
-  • Query 1: COUNT query to get the total number
-  • Query 2: SELECT query to get examples with details
-- If the user asks only for a count, return 1 COUNT query.
-- If the user asks only for a list/examples, return 1 SELECT query.
-- Return queries as a JSON array: ["query1", "query2"].
-
-COLUMN SELECTION STRATEGY:
-- General lists: select key columns like "main.voter", "main.decision", "cv.self_voting_power", "main.created_at", "main.proposal_index", "main.type", "main.is_delegated".
-- Voter analysis: focus on "main.voter", "cv.self_voting_power", "main.decision", "main.is_delegated", "main.delegated_to", "main.created_at".
-- Proposal analysis: include "main.proposal_index", "main.type", "main.created_at", "main.decision", "cv.self_voting_power".
-- Avoid SELECT * unless absolutely necessary.
-
-WINDOW FUNCTION FOR COUNT:
-- When using LIMIT clause, ALWAYS include COUNT(*) OVER() as total_count to get the total number of matching records
-- This allows showing "Found X voting records, displaying few" with accurate total count
-- Example: SELECT main."voter", main."decision", cv."self_voting_power", COUNT(*) OVER() as total_count FROM table WHERE conditions ORDER BY created_at DESC LIMIT 10;
-
-ORDER BY NULL HANDLING EXAMPLE:
-- WRONG: SELECT * FROM table WHERE conditions ORDER BY "created_at" DESC
-- CORRECT: SELECT * FROM table WHERE conditions AND "created_at" IS NOT NULL ORDER BY "created_at" DESC
-- ALWAYS add IS NOT NULL for the ORDER BY column in the WHERE clause
-- ALTERNATIVE: Use NULLS LAST to push NULL values to bottom: ORDER BY "created_at" DESC NULLS LAST
-
-EXAMPLE VOTING QUERIES (WITH CORRECT JOIN):
-
-Single Query Examples:
-- "Show me recent votes"
-  -> SELECT main."voter", main."decision", cv."self_voting_power", main."created_at", main."proposal_index", main."type", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE main."created_at" IS NOT NULL AND main."voter" IS NOT NULL
-     ORDER BY main."created_at" DESC
-     LIMIT 10;
-
-
-- "How many unique voters were there in November 2025?"
-  -> SELECT COUNT(DISTINCT main."voter") AS unique_voters_count
-     FROM {self.table_name} AS main
-     WHERE main."voter" IS NOT NULL 
-       AND main."created_at" IS NOT NULL 
-       AND main."created_at" >= '2025-11-01' 
-       AND main."created_at" < '2025-12-01';
-
-- "Voters with more than 1000 DOT voting power"
-  -> SELECT main."voter", cv."self_voting_power", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE cv."self_voting_power" IS NOT NULL AND main."voter" IS NOT NULL
-       AND cv."self_voting_power" > 1000
-     ORDER BY cv."self_voting_power" DESC
-     LIMIT 10;
-
-- "Votes on proposal 123"
-  -> SELECT main."voter", main."decision", cv."self_voting_power", main."created_at", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE main."proposal_index" = 123 AND main."proposal_index" IS NOT NULL AND main."voter" IS NOT NULL;
-
-- "Show delegated votes"
-  -> SELECT main."voter", main."delegated_to", main."decision", cv."self_voting_power", main."proposal_index", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE main."is_delegated" = TRUE AND main."voter" IS NOT NULL
-     LIMIT 10;
-
-- "Active votes only (exclude removed)"
-  -> SELECT main."voter", main."decision", cv."self_voting_power", main."created_at", main."proposal_index", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE main."removed_at" IS NULL AND main."created_at" IS NOT NULL AND main."voter" IS NOT NULL
-     ORDER BY main."created_at" DESC
-     LIMIT 10;
-
-- "Votes with conviction lock period >= 4"
-  -> SELECT main."voter", main."decision", cv."self_voting_power", main."lock_period", main."proposal_index", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE main."lock_period" IS NOT NULL AND main."lock_period" >= 4 AND main."voter" IS NOT NULL
-     ORDER BY main."lock_period" DESC
-     LIMIT 10;
-
-- "Top voters by voting power"
-  -> SELECT main."voter", SUM(cv."self_voting_power") AS total_voting_power, COUNT(*) AS vote_count, COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
-     WHERE cv."self_voting_power" IS NOT NULL AND main."voter" IS NOT NULL
-     GROUP BY main."voter"
-     ORDER BY total_voting_power DESC
-     LIMIT 10;
-
-- "Show me all votes ordered by date"
-  -> SELECT main."voter", main."decision", main."created_at", COUNT(*) OVER() as total_count
-     FROM {self.table_name} AS main
-     ORDER BY main."created_at" DESC NULLS LAST
-     LIMIT 10;
-
-Multiple Query Example:
-- "How many voters in July and show some?"
-  -> [
-       "SELECT COUNT(DISTINCT main.\"voter\") AS total_voters FROM {self.table_name} AS main WHERE main.\"created_at\" IS NOT NULL AND main.\"voter\" IS NOT NULL AND DATE_TRUNC('month', main.\"created_at\") = '2025-07-01';",
-       "SELECT main.\"voter\", main.\"decision\", cv.\"self_voting_power\", main.\"created_at\", main.\"proposal_index\", COUNT(*) OVER() as total_count FROM {self.table_name} AS main LEFT JOIN conviction_vote AS cv ON main.\"parent_vote_id\" = cv.\"id\" WHERE main.\"created_at\" IS NOT NULL AND main.\"voter\" IS NOT NULL AND DATE_TRUNC('month', main.\"created_at\") = '2025-07-01' ORDER BY main.\"created_at\" DESC LIMIT 10;"
-     ]
-
-Natural Language Query: {natural_query}
-
-SQL Query:
-"""
+        from ..prompts.voting_sql_generation_with_context_prompt import PROMPT_TEMPLATE as voting_sql_generation_with_context_template
+        base_system_prompt = voting_sql_generation_with_context_template.format(
+            history_text=history_text,
+            table_name=self.table_name,
+            table_schema=self.table_schema,
+            natural_query=natural_query
+        )
         
         last_error = None
         last_sql_queries = None

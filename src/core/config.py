@@ -81,7 +81,5 @@ class Config:
         if cls.ENABLE_AUTHENTICATION and not cls.POLKASSEMBLY_AI_TOKEN:
             raise ValueError("POLKASSEMBLY_AI_TOKEN must be set when authentication is enabled")
         
-        if not os.path.exists(cls.DATA_SOURCES_PATH):
-            raise ValueError(f"Data sources path does not exist: {cls.DATA_SOURCES_PATH}")
-            
+
         return True 
