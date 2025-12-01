@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from .config import Config
+from ..core.config import Config
 
 logger = logging.getLogger(__name__)
 

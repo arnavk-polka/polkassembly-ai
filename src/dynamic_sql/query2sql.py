@@ -88,9 +88,7 @@ except ImportError:
 
 # Add Gemini client
 try:
-    import sys
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-    from gemini import GeminiClient
+    from ..core.gemini_client import GeminiClient
 except ImportError:
     GeminiClient = None
     print("Warning: Gemini client not available")

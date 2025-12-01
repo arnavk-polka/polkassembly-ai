@@ -6,7 +6,7 @@ import time
 from typing import List, Dict, Any, Optional, Tuple
 from chromadb.config import Settings
 import numpy as np
-from src.app.config import Config
+from .config import Config
 from .errors import is_insufficient_quota_error, get_quota_error_message
 
 logging.basicConfig(level=logging.INFO)

@@ -24,14 +24,14 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .config import Config
+from ..core.config import Config
 from .auth import authenticate_request, get_auth_status
 from ..core.embeddings import EmbeddingManager
 from ..core.qa_generator import QAGenerator
 from ..safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
 from ..core.rate_limiter import check_rate_limit, get_client_stats
-from .chunks_reranker import rerank_static_chunks
-from .server_monitor import (
+from ..core.reranking.chunks_reranker import rerank_static_chunks
+from ..ops.monitoring import (
     initialize_slack_bot,
     send_startup_notification,
     send_shutdown_notification,
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
         # Initialize semantic reranker
         try:
             logger.info("Initializing semantic reranker...")
-            from .semantic_reranker import SemanticReranker
+            from ..core.reranking.semantic_reranker import SemanticReranker
             reranker = SemanticReranker()
             set_reranker(reranker)
             logger.info("Semantic reranker initialized successfully")

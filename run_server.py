@@ -26,7 +26,7 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
     print(traceback_str, file=sys.stderr)
     
     try:
-        from src.app.server_monitor import send_crash_notification
+        from src.ops.monitoring import send_crash_notification
         send_crash_notification(exc_type, exc_value, traceback_str)
     except Exception as slack_error:
         print(f"Failed to send crash notification to Slack: {slack_error}", file=sys.stderr)
@@ -35,7 +35,7 @@ sys.excepthook = handle_unhandled_exception
 
 if __name__ == "__main__":
     import uvicorn
-    from src.app.config import Config
+    from src.core.config import Config
     
     print("Starting Polkadot AI Chatbot API server...")
     try:
@@ -53,7 +53,7 @@ if __name__ == "__main__":
         print(traceback_str, file=sys.stderr)
         
         try:
-            from src.app.server_monitor import send_crash_notification
+            from src.ops.monitoring import send_crash_notification
             send_crash_notification(type(e), e, traceback_str)
         except Exception as slack_error:
             print(f"Failed to send error notification to Slack: {slack_error}", file=sys.stderr)

@@ -1017,8 +1017,8 @@ async def processUserQuery(
                 n_results=initial_chunks_to_retrieve
             )
             
-            from .semantic_reranker import get_reranker
-            from .chunks_reranker import keyword_filter, final_rerank
+            from ..core.reranking.semantic_reranker import get_reranker
+            from ..core.reranking.chunks_reranker import keyword_filter, final_rerank
             
             reranker = get_reranker()
             
@@ -1355,7 +1355,7 @@ async def processUserQuery(
                 query=analyzed_query,
                 n_results=initial_chunks_to_retrieve
             )
-            from .chunks_reranker import rerank_static_chunks, final_rerank
+            from ..core.reranking.chunks_reranker import rerank_static_chunks, final_rerank
             # 1. Keyword filtering
             static_chunks = rerank_static_chunks(query=analyzed_query, static_chunks=static_chunks)
             

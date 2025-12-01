@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import Config
+from ..core.config import Config
 from ..integrations.slack_bot import SlackBot
 
 logger = None

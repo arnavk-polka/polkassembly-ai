@@ -15,7 +15,7 @@ import json
 from src.core.embeddings import EmbeddingManager
 from src.core.text_chunker import TextChunker
 from src.ingestion.data_loader import DataLoader
-from src.app.config import Config
+from src.core.config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

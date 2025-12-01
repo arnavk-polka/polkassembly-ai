@@ -20,8 +20,7 @@ except ImportError:
 # Add SlackBot for error notifications
 try:
     # Try relative import first (when imported as module)
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-    from slack_bot import SlackBot
+    from ..integrations.slack_bot import SlackBot
 except ImportError:
     SlackBot = None
 

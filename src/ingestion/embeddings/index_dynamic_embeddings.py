@@ -18,7 +18,7 @@ from datetime import datetime
 # Imports use src.* paths, no sys.path manipulation needed
 
 from src.core.embeddings import EmbeddingManager
-from src.app.config import Config
+from src.core.config import Config
 
 # Load environment variables
 load_dotenv()
