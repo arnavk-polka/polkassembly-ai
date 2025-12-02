@@ -203,7 +203,7 @@ print("Onchain data fetch completed!")
 import sys
 sys.path.insert(0, "{project_root / "src"}")
 
-from src.dynamic_sql.flatten_all_data import DataFlattener
+from src.ingestion.onchain.flatten_all_data import DataFlattener
 
 # Initialize with our custom paths
 flattener = DataFlattener(
@@ -284,7 +284,7 @@ print("JSON flattening completed!")
 import sys
 sys.path.insert(0, "{project_root / "src"}")
 
-from src.dynamic_sql.create_one_table import CSVCombiner
+from src.ingestion.onchain.create_one_table import CSVCombiner
 
 # Initialize with our custom paths
 combiner = CSVCombiner(

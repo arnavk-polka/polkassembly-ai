@@ -17,18 +17,15 @@ import psycopg2
 import json
 import time
 
-# Load environment variables from .env file
 load_dotenv()
 
-# Setup project root for imports
-# Assumes the script is in src/dynamic_sql/
 project_root = Path(__file__).parent.parent.parent.resolve()
 sys.path.insert(0, str(project_root))
 
 try:
-    from src.dynamic_sql.flatten_all_data import DataFlattener
-    from src.dynamic_sql.create_one_table import CSVCombiner
-    from src.dynamic_sql.insert_into_postgres import PostgresInserter
+    from src.ingestion.onchain.flatten_all_data import DataFlattener
+    from src.ingestion.onchain.create_one_table import CSVCombiner
+    from src.ingestion.onchain.insert_into_postgres import PostgresInserter
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure that the script is run from a location where 'src' module is accessible,")
@@ -36,12 +33,9 @@ except ImportError as e:
     sys.exit(1)
 
 
-# --- Configuration ---
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Directory structure
 ONCHAIN_DATA_DIR = os.getenv("ONCHAIN_DATA_DIR")
 if not ONCHAIN_DATA_DIR:
     logger.error("❌ Environment variable ONCHAIN_DATA_DIR is not set. Please set it to the desired data directory.")
@@ -54,7 +48,6 @@ ONE_TABLE_DIR = DATA_ROOT / "one_table"
 COMBINED_CSV_FILENAME = "combined_governance_data.csv"
 COMBINED_CSV_PATH = ONE_TABLE_DIR / COMBINED_CSV_FILENAME
 
-# Ensure directories exist
 DATA_ROOT.mkdir(exist_ok=True, parents=True)
 JSON_DIR.mkdir(exist_ok=True)
 CSV_DIR.mkdir(exist_ok=True)
@@ -147,13 +140,11 @@ def get_database_row_indexes() -> set:
         inserter = PostgresInserter()
         with inserter.get_connection() as conn:
             with conn.cursor() as cur:
-                # Check if table exists first
                 cur.execute("SELECT to_regclass(%s)", (inserter.table_name,))
                 if cur.fetchone()[0] is None:
                     logger.warning(f"Table '{inserter.table_name}' does not exist. Assuming all rows are new.")
                     return db_row_indexes
 
-                # Check if column exists
                 cur.execute("""
                     SELECT 1 FROM information_schema.columns 
                     WHERE table_name=%s AND column_name='row_index'
@@ -164,11 +155,9 @@ def get_database_row_indexes() -> set:
 
                 logger.info(f"Querying table '{inserter.table_name}' for 'row_index' column...")
                 cur.execute(f'SELECT "row_index" FROM {inserter.table_name};')
-                # Fetch all rows and handle potential None values
                 rows = cur.fetchall()
                 for row in rows:
                     if row[0] is not None:
-                        # Convert to string to match the type from pandas
                         db_row_indexes.add(str(row[0]))
 
         logger.info(f"✅ Found {len(db_row_indexes)} unique row_indexes in the database.")
@@ -202,7 +191,6 @@ def save_new_rows_to_json(source_df: pd.DataFrame, db_row_indexes: set):
         output_filename = ONE_TABLE_DIR / "new_rows_to_insert.json"
         logger.warning(f"Found {len(new_rows_df)} new rows to be inserted.")
 
-        # Select the required columns and create a list of dictionaries
         output_data = new_rows_df[['row_index', 'createdat']].to_dict(orient='records')
 
         try:
@@ -217,25 +205,16 @@ def main():
     """Main function to run the entire data pipeline."""
     logger.info("🚀 Starting the on-chain data processing pipeline...")
     
-    # Step 1: Fetch data from on-chain sources
     fetch_onchain_data()
     
-    # Step 2: Flatten the raw JSON data into multiple CSV files
     flatten_json_to_csv()
     
-    # Step 3: Combine all CSV files into one large table
     combine_csvs_to_one_table()
     
-    # Step 4: Get the list of original indexes from the combined CSV
     source_dataframe = get_combined_csv_data(COMBINED_CSV_PATH)
     
-    # Step 5: Insert the combined data into the database
-    # insert_data_to_database(COMBINED_CSV_PATH)
-    
-    # Step 6: Get the list of indexes that were successfully inserted
     database_row_indexes = get_database_row_indexes()
     
-    # Step 7: Compare the lists and report any discrepancies
     save_new_rows_to_json(source_dataframe, database_row_indexes)
     
     logger.info("\n🏁 Pipeline finished.")

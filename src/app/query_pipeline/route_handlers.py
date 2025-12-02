@@ -477,27 +477,12 @@ async def handle_generic_route(
     """Handle generic route queries."""
     log_step("generic_route_start", {})
     
-    if qa_generator.memory_manager and qa_generator.memory_manager.enabled:
-        try:
-            qa_generator.memory_manager.add_user_query(analyzed_query, user_id)
-        except Exception as e:
-            log_step("memory_add_error", {"error": str(e)}, "warning")
-    
     qa_result = await handle_generic_query_llm(
         analyzed_query,
         conversationHistory,
         qa_generator,
         log_step
     )
-    
-    if qa_generator.memory_manager and qa_generator.memory_manager.enabled:
-        try:
-            qa_generator.memory_manager.add_assistant_response(
-                qa_result.get('answer', ''),
-                user_id
-            )
-        except Exception as e:
-            log_step("memory_add_error", {"error": str(e)}, "warning")
     
     log_step("generic_route_complete", {
         "search_method": qa_result.get('search_method', 'unknown')

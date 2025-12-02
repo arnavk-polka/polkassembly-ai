@@ -16,15 +16,14 @@ def metadata_priority_score(chunk):
 
     score = 0.0
 
-    # Priority boosts
     if "pa_docs" in str(metadata):
-        score += 0.30      # highest priority boost
+        score += 0.30      
 
     if "polkassembly" in content or "polkassembly" in str(metadata):
-        score += 0.20      # medium priority boost
+        score += 0.20      
 
     if "s3.amazonaws.com" in content:
-        score += 0.10      # small boost for images
+        score += 0.10      
 
     return score
 

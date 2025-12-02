@@ -6,9 +6,7 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 
-# Imports use src.* paths, no sys.path manipulation needed
-
-from src.dynamic_sql.insert_into_postgres import PostgresInserter
+from src.ingestion.onchain.insert_into_postgres import PostgresInserter
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +18,6 @@ logger = logging.getLogger(__name__)
 def main():
     """Main execution function to insert vote data."""
     
-    # --- Configuration --- (do not hardcode paths)
     from dotenv import load_dotenv
     load_dotenv()
     csv_file = Path(os.getenv("VOTING_CSV_FILE", ""))
@@ -37,16 +34,13 @@ def main():
         return
 
     try:
-        # Create inserter with vote-specific configuration
         inserter = PostgresInserter(
             table_name=table_name,
             schema_path=str(schema_file)
         )
         
-        # Drop behavior controlled by environment variable only (non-interactive)
         drop_existing = os.getenv('POSTGRES_DROP_EXISTING', 'false').lower() == 'true'
         
-        # Run the full import process
         success = inserter.run_full_import(csv_file, drop_existing=drop_existing)
         
         if success:

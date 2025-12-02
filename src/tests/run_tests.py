@@ -15,12 +15,6 @@ def run_api_tests():
     from src.tests.test_api import main as api_main
     api_main()
 
-def run_memory_tests():
-    """Run memory integration tests"""
-    print("\n🧠 Running Memory Tests...")
-    from src.tests.test_memory import main as memory_main
-    memory_main()
-
 def run_formatting_tests():
     """Run formatting validation tests"""
     print("\n🎨 Running Formatting Tests...")
@@ -55,7 +49,6 @@ def main():
     """Main test runner with options"""
     parser = argparse.ArgumentParser(description='Run Polkadot AI Chatbot tests')
     parser.add_argument('--api', action='store_true', help='Run API tests only')
-    parser.add_argument('--memory', action='store_true', help='Run memory tests only')
     parser.add_argument('--formatting', action='store_true', help='Run formatting tests only')
     parser.add_argument('--guardrails', action='store_true', help='Run enhanced guardrails tests only')
     parser.add_argument('--rate-limit', action='store_true', help='Run rate limiting tests only')
@@ -67,13 +60,10 @@ def main():
     print("=" * 50)
     
     # Determine which tests to run
-    run_all = args.all and not any([args.api, args.memory, args.formatting, args.guardrails, getattr(args, 'rate_limit', False)])
+    run_all = args.all and not any([args.api, args.formatting, args.guardrails, getattr(args, 'rate_limit', False)])
     
     if args.api or run_all:
         run_api_tests()
-    
-    if args.memory or run_all:
-        run_memory_tests()
     
     if args.formatting or run_all:
         run_formatting_tests()

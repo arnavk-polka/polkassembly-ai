@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -35,11 +34,9 @@ class CSVCombiner:
             try:
                 logger.info(f"Analyzing {csv_file.name}")
                 
-                # Read just the header to get column info
                 df_sample = pd.read_csv(csv_file, nrows=0)
                 columns = list(df_sample.columns)
                 
-                # Get basic file info
                 df_full = pd.read_csv(csv_file)
                 
                 file_info[csv_file.name] = {
@@ -50,7 +47,6 @@ class CSVCombiner:
                     'file_size_mb': csv_file.stat().st_size / (1024 * 1024)
                 }
                 
-                # Add to global column set
                 all_columns.update(columns)
                 
                 logger.info(f"  - {len(columns)} columns, {len(df_full)} rows, {file_info[csv_file.name]['file_size_mb']:.2f} MB")
@@ -99,7 +95,6 @@ class CSVCombiner:
     
     def add_source_tracking_columns(self, df: pd.DataFrame, filename: str) -> pd.DataFrame:
         """Add columns to track source file and metadata"""
-        # Extract metadata from filename
         parts = filename.replace('.csv', '').split('_')
         
         if len(parts) >= 2:
@@ -109,7 +104,6 @@ class CSVCombiner:
             network = 'unknown'
             proposal_type = 'unknown'
         
-        # Add tracking columns at the beginning
         df.insert(0, 'source_file', filename)
         df.insert(1, 'source_network', network)
         df.insert(2, 'source_proposal_type', proposal_type)
@@ -131,23 +125,18 @@ class CSVCombiner:
                 # Read the CSV file
                 df = pd.read_csv(info['path'])
                 
-                # Add source tracking columns
                 df = self.add_source_tracking_columns(df, filename)
                 
-                # Reindex to match all columns (fills missing columns with NaN)
                 current_columns = list(df.columns)
                 missing_columns = [col for col in all_columns if col not in current_columns and not col.startswith('source_')]
                 
-                # Add missing columns with NaN values
                 for col in missing_columns:
                     df[col] = pd.NA
                 
-                # Reorder columns to match the master column order
                 source_cols = ['source_file', 'source_network', 'source_proposal_type', 'source_row_id']
                 other_cols = [col for col in all_columns if col not in source_cols]
                 final_column_order = source_cols + other_cols
                 
-                # Only select columns that exist in the dataframe
                 available_columns = [col for col in final_column_order if col in df.columns]
                 df = df[available_columns]
                 
@@ -163,23 +152,18 @@ class CSVCombiner:
         if not combined_dfs:
             raise ValueError("No CSV files could be processed successfully")
         
-        # Combine all DataFrames
         logger.info("Concatenating all DataFrames...")
         combined_df = pd.concat(combined_dfs, ignore_index=True, sort=False)
         
         logger.info("Creating row_index column...")
-        # Per user request, create a row_index from specific columns with an underscore separator.
-        # Using corrected column names for robustness: source_network and onchaininfo_hash.
         cols_to_concat = ['source_network', 'source_proposal_type', 'index', 'onchaininfo_hash']
         separator = "_"
 
-        # Ensure required columns exist to avoid errors
         for col in cols_to_concat:
             if col not in combined_df.columns:
                 logger.warning(f"'{col}' column not found for row_index generation. It will be treated as empty.")
                 combined_df[col] = ''
 
-        # Create the new column by joining the specified columns with the separator
         combined_df["row_index"] = combined_df[cols_to_concat].astype(str).agg(separator.join, axis=1)
         
         logger.info(f"Combined DataFrame created: {len(combined_df)} rows, {len(combined_df.columns)} columns")
@@ -189,12 +173,10 @@ class CSVCombiner:
                               combined_df: pd.DataFrame) -> Dict:
         """Generate a comprehensive summary report"""
         
-        # Source file statistics
         source_stats = combined_df['source_file'].value_counts().to_dict()
         network_stats = combined_df['source_network'].value_counts().to_dict()
         proposal_type_stats = combined_df['source_proposal_type'].value_counts().to_dict()
         
-        # Data quality analysis
         null_counts = combined_df.isnull().sum().sort_values(ascending=False)
         columns_with_data = (combined_df.notna().sum() > 0).sum()
         completely_empty_columns = (combined_df.isnull().all()).sum()
@@ -248,22 +230,17 @@ class CSVCombiner:
         """Run the complete CSV combination process"""
         logger.info("Starting CSV combination process...")
         
-        # Step 1: Analyze all CSV files
         file_info, all_columns = self.analyze_csv_files()
         
         if not file_info:
             raise ValueError("No valid CSV files found to process")
         
-        # Step 2: Analyze column overlaps
         overlap_analysis = self.find_column_overlaps(file_info)
         
-        # Step 3: Combine all CSV files
         combined_df = self.combine_csv_files(file_info, all_columns)
         
-        # Step 4: Generate summary report
         summary = self.generate_summary_report(file_info, overlap_analysis, combined_df)
         
-        # Step 5: Save results
         csv_path = self.save_combined_csv(combined_df)
         summary_path = self.save_summary_report(summary)
         
@@ -277,7 +254,6 @@ class CSVCombiner:
 
 def main():
     """Main execution function"""
-    # Configuration - use the new CSV location and output location
     csv_directory = Path(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/all_csv")
     output_directory = Path(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/one_table")
 
@@ -286,14 +262,11 @@ def main():
         logger.error(f"CSV directory not found: {csv_directory}")
         return
     
-    # Initialize combiner
     combiner = CSVCombiner(str(csv_directory), str(output_directory))
     
     try:
-        # Run combination process
         results = combiner.run_combination()
         
-        # Print summary
         summary = results['summary_data']
         print("\n" + "="*60)
         print("CSV COMBINATION SUMMARY")

@@ -8,8 +8,6 @@ from typing import Optional, List, Dict, Any
 import psycopg2
 from psycopg2.extras import execute_values, Json
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 from src.ingestion.onchain.onchain_data import PolkassemblyDataFetcher, _resolve_data_dir
 
 logger = logging.getLogger(__name__)

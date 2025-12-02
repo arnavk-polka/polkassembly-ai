@@ -84,9 +84,6 @@ async def lifespan(app: FastAPI):
             openai_api_key=Config.OPENAI_API_KEY,
             model=Config.OPENAI_MODEL,
             temperature=0.1,
-            enable_web_search=Config.ENABLE_WEB_SEARCH,
-            web_search_context_size=Config.WEB_SEARCH_CONTEXT_SIZE,
-            enable_memory=Config.USE_MEM0 and bool(Config.MEM0_API_KEY)
         )
         
         slack_bot = initialize_slack_bot()
@@ -264,7 +261,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             )
         elif guardrail_result["status"] == "error":
             logger.error(f"Guardrail error for user {request.user_id}: {guardrail_result['reason']}")
-        
+    
         conversation_history_dicts = None
         if request.conversation_history:
             conversation_history_dicts = []
@@ -330,7 +327,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 chunks_used=0,
                 processing_time_ms=processing_time,
                 timestamp=datetime.now().isoformat(),
-                    search_method="query_processor_error"
+                search_method="query_processor_error"
             )
         
         sources = []
@@ -346,7 +343,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             ]
         
         processing_time = qa_result.get('processing_time_ms', (datetime.now() - start_time).total_seconds() * 1000)
-        
+
         answer = qa_result['answer']
         if answer:
             answer = answer.strip()
@@ -564,4 +561,4 @@ if __name__ == "__main__":
         
         send_crash_notification(type(e), e, traceback_str)
         
-        sys.exit(1)
+        sys.exit(1) 

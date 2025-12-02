@@ -38,7 +38,6 @@ class DataFlattener:
         else:
             output_path = Path(__file__).parent.parent / "data"
         
-        # Create output directories - CSV files go to all_csv subdirectory
         self.csv_dir = output_path / "all_csv"
         self.metadata_dir = output_path / "metadata"
         self.csv_dir.mkdir(exist_ok=True, parents=True)
@@ -84,11 +83,9 @@ class DataFlattener:
         """Analyze CSV data to create comprehensive metadata for query routing"""
         analysis = {}
         
-        # Basic statistics
         analysis['total_rows'] = len(df)
         analysis['total_columns'] = len(df.columns)
         
-        # Column analysis
         column_details = {}
         key_columns = []
         date_columns = []
@@ -100,7 +97,6 @@ class DataFlattener:
             col_lower = col.lower()
             non_null_values = df[col].dropna()
             
-            # Determine column category
             if any(pattern in col_lower for pattern in ['id', 'hash', 'address', 'proposer', 'beneficiary']):
                 key_columns.append(col)
             elif any(pattern in col_lower for pattern in ['created_at', 'updated_at', 'timestamp', 'date', 'time']):
@@ -112,7 +108,6 @@ class DataFlattener:
             elif any(pattern in col_lower for pattern in ['title', 'content', 'description', 'name']):
                 content_columns.append(col)
             
-            # Get sample values and statistics
             sample_values = non_null_values.unique()[:5].tolist()
             unique_count = non_null_values.nunique()
             
@@ -137,7 +132,6 @@ class DataFlattener:
             'content_columns': content_columns
         }
         
-        # Status analysis for query routing
         if status_columns:
             status_analysis = {}
             for status_col in status_columns:
@@ -145,12 +139,10 @@ class DataFlattener:
                 status_analysis[status_col] = status_counts
             analysis['status_distribution'] = status_analysis
         
-        # Date range analysis
         if date_columns:
             date_analysis = {}
             for date_col in date_columns:
                 try:
-                    # Try to parse dates
                     pd_dates = pd.to_datetime(df[date_col], errors='coerce')
                     valid_dates = pd_dates.dropna()
                     if len(valid_dates) > 0:
@@ -163,7 +155,6 @@ class DataFlattener:
                     pass
             analysis['date_ranges'] = date_analysis
         
-        # Network and proposal type specific analysis
         if 'network' in df.columns:
             network_counts = df['network'].value_counts().to_dict()
             analysis['network_distribution'] = network_counts
@@ -172,11 +163,9 @@ class DataFlattener:
             proposal_counts = df['proposal_type'].value_counts().to_dict()
             analysis['proposal_type_distribution'] = proposal_counts
         
-        # Content analysis for search
         if content_columns:
             content_analysis = {}
             for content_col in content_columns:
-                # Get sample content for understanding
                 sample_content = df[content_col].dropna().head(3).tolist()
                 content_analysis[content_col] = {
                     'sample_content': sample_content,
@@ -193,10 +182,8 @@ class DataFlattener:
         """Extract sample data for metadata generation"""
         sample_data = {}
         for col in df.columns:
-            # Get non-null values
             non_null_values = df[col].dropna()
             if len(non_null_values) > 0:
-                # Get unique values (up to max_samples)
                 unique_values = non_null_values.unique()[:max_samples]
                 sample_data[col] = {
                     'data_type': str(df[col].dtype),
@@ -215,13 +202,11 @@ class DataFlattener:
             return self.generate_basic_metadata(filename, sample_data, network, proposal_type, total_items, csv_analysis)
         
         try:
-            # Create a comprehensive prompt for OpenAI with actual data samples
             table_name = filename.replace('.json', '').replace('.csv', '')
             categories = csv_analysis['column_categories']
             
-            # Get first 10 rows of actual data for better context
             sample_rows = []
-            for col in list(sample_data.keys())[:15]:  # Top 15 columns
+            for col in list(sample_data.keys())[:15]:
                 col_data = sample_data[col]
                 sample_rows.append({
                     "column": col,
@@ -284,20 +269,16 @@ class DataFlattener:
                 max_tokens=2000
             )
             
-            # Parse the response
             content = response.choices[0].message.content
             try:
-                # Try to extract JSON from the response
                 json_start = content.find('{')
                 json_end = content.rfind('}') + 1
                 if json_start != -1 and json_end > json_start:
                     metadata = json.loads(content[json_start:json_end])
                 else:
-                    # Fallback to basic metadata
                     metadata = self.generate_basic_metadata(filename, sample_data, network, proposal_type, total_items, csv_analysis)
                     metadata['openai_generated_description'] = content
             except json.JSONDecodeError:
-                # Fallback to basic metadata
                 metadata = self.generate_basic_metadata(filename, sample_data, network, proposal_type, total_items, csv_analysis)
                 metadata['openai_generated_description'] = content
             
@@ -312,10 +293,8 @@ class DataFlattener:
                                csv_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """Generate compact metadata for query routing"""
         
-        # Generate table name from CSV filename
         table_name = filename.replace('.json', '').replace('.csv', '')
         
-        # Create compact description for routing
         description = f"{proposal_type} data from {network} network"
         if 'ReferendumV2' in proposal_type:
             description += " - OpenGov referendums, voting, tracks"
@@ -324,7 +303,6 @@ class DataFlattener:
         elif 'Bounty' in proposal_type:
             description += " - Community bounties, rewards, curators"
         
-        # Identify key query fields
         categories = csv_analysis['column_categories']
         query_fields = []
         if categories['status_columns']:
@@ -334,7 +312,6 @@ class DataFlattener:
         if categories['date_columns']:
             query_fields.extend(categories['date_columns'][:1])
         
-        # Generate routing keywords
         routing_keywords = [network, proposal_type.lower()]
         if 'referendum' in proposal_type.lower():
             routing_keywords.extend(['referendum', 'vote', 'track', 'opengov'])
@@ -343,7 +320,6 @@ class DataFlattener:
         elif 'bounty' in proposal_type.lower():
             routing_keywords.extend(['bounty', 'reward', 'curator', 'community'])
         
-        # Build query capabilities list (no None values)
         query_capabilities = []
         if categories['status_columns']:
             query_capabilities.append("status_filtering")
@@ -356,7 +332,6 @@ class DataFlattener:
         if categories['numeric_columns']:
             query_capabilities.append("financial_analysis")
         
-        # Generate example queries based on actual column names and data
         example_queries = self.generate_example_queries(
             table_name, categories, network, proposal_type, sample_data
         )
@@ -367,7 +342,7 @@ class DataFlattener:
             "proposal_type": proposal_type,
             "description": description,
             "record_count": total_items,
-            "key_fields": query_fields[:5],  # Top 5 most important fields
+            "key_fields": query_fields[:5],
             "routing_keywords": routing_keywords,
             "query_capabilities": query_capabilities,
             "example_queries": example_queries
@@ -378,14 +353,12 @@ class DataFlattener:
         """Generate realistic example queries based on actual column names and data"""
         queries = []
         
-        # Get actual column names
         status_cols = categories['status_columns'][:2]
         date_cols = categories['date_columns'][:2] 
         key_cols = categories['key_columns'][:3]
         content_cols = categories['content_columns'][:2]
         numeric_cols = categories['numeric_columns'][:3]
         
-        # Get sample values for more realistic queries
         sample_status = []
         sample_ids = []
         
@@ -395,7 +368,6 @@ class DataFlattener:
             elif col in key_cols and 'id' in col.lower() and data['sample_values']:
                 sample_ids.extend([str(v) for v in data['sample_values'][:2]])
         
-        # Status-based queries (natural language)
         if status_cols:
             queries.extend([
                 "Show me all active proposals",
@@ -407,7 +379,6 @@ class DataFlattener:
             if sample_status:
                 queries.append(f"Find all proposals that are {sample_status[0]}")
         
-        # Date-based queries (natural language)
         if date_cols:
             queries.extend([
                 "What proposals were created in the last month?",
@@ -417,7 +388,6 @@ class DataFlattener:
                 "Show me proposals from last week"
             ])
         
-        # ID/Key-based queries (natural language)
         if key_cols:
             queries.extend([
                 "Find a specific proposal by ID",
@@ -427,7 +397,6 @@ class DataFlattener:
             if sample_ids:
                 queries.append(f"Show me proposal {sample_ids[0]}")
         
-        # Content search queries (natural language)
         if content_cols:
             queries.extend([
                 "Search for proposals about treasury spending",
@@ -436,7 +405,6 @@ class DataFlattener:
                 "Search for proposals about infrastructure"
             ])
         
-        # Financial/Numeric queries (natural language)
         if numeric_cols:
             queries.extend([
                 "What are the highest value proposals?",
@@ -445,7 +413,6 @@ class DataFlattener:
                 "What's the total amount of all proposals?"
             ])
         
-        # Network-specific queries (natural language)
         queries.extend([
             f"Show me all proposals from {network}",
             "Compare governance between Polkadot and Kusama",
@@ -453,7 +420,6 @@ class DataFlattener:
             f"How is {network} performing?"
         ])
         
-        # Proposal type specific queries (natural language)
         if 'referendum' in proposal_type.lower():
             queries.extend([
                 "How did people vote on recent referendums?",
@@ -476,10 +442,9 @@ class DataFlattener:
                 "Who are the bounty curators?",
                 "Show me completed bounties and their rewards",
                 "What bounties need curators?",
-                "How much are bounty rewards?"
+                    "How much are bounty rewards?"
             ])
         
-        # General governance queries (natural language)
         queries.extend([
             "What are the latest governance trends?",
             "Who are the most active proposers?",
@@ -488,14 +453,13 @@ class DataFlattener:
             "How active is the community?"
         ])
         
-        return queries[:20]  # Return top 20 most relevant queries
+        return queries[:20]
     
     def process_json_file(self, json_file_path: Path) -> Tuple[bool, str]:
         """Process a single JSON file and generate CSV + metadata"""
         try:
             logger.info(f"Processing {json_file_path.name}")
             
-            # Read JSON file
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             

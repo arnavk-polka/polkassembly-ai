@@ -24,7 +24,6 @@ class DataLoader:
             metadata = {}
             text_content = ""
             
-            # Parse metadata from the beginning of text files
             if len(lines) > 0 and lines[0].startswith('Title: '):
                 metadata['title'] = lines[0].replace('Title: ', '').strip()
             
@@ -48,7 +47,6 @@ class DataLoader:
                     break
             
             if not separator_found:
-                # If no separator found, use all content after metadata
                 start_idx = 0
                 for i, line in enumerate(lines):
                     if line.strip() == "":
@@ -74,7 +72,6 @@ class DataLoader:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Extract content from JSON structure
             content_parts = []
             
             if 'title' in data:
@@ -86,10 +83,9 @@ class DataLoader:
             if 'content' in data and data['content']:
                 content_parts.append(data['content'])
             
-            # Add topics if available (for forum data)
             if 'topics' in data and data['topics']:
                 topics_text = "Related Topics:\n"
-                for topic in data['topics'][:10]:  # Limit to first 10 topics
+                for topic in data['topics'][:10]:
                     topics_text += f"- {topic.get('title', '')}\n"
                 content_parts.append(topics_text)
             
@@ -117,7 +113,6 @@ class DataLoader:
         """Load all documents from both data sources"""
         documents = []
         
-        # Load from polkadot_network
         if os.path.exists(self.polkadot_network_path):
             logger.info(f"Loading documents from {self.polkadot_network_path}")
             for file_name in os.listdir(self.polkadot_network_path):
@@ -128,7 +123,6 @@ class DataLoader:
                         if doc and doc['content'].strip():
                             documents.append(doc)
                     elif file_name.endswith('.json'):
-                        # Skip JSON files that have corresponding TXT files
                         txt_file = file_name.replace('.json', '.txt')
                         txt_path = os.path.join(self.polkadot_network_path, txt_file)
                         if not os.path.exists(txt_path):
@@ -136,7 +130,6 @@ class DataLoader:
                             if doc and doc['content'].strip():
                                 documents.append(doc)
         
-        # Load from polkadot_wiki
         if os.path.exists(self.polkadot_wiki_path):
             logger.info(f"Loading documents from {self.polkadot_wiki_path}")
             for file_name in os.listdir(self.polkadot_wiki_path):

@@ -26,27 +26,24 @@ class EmbeddingManager:
         self.chroma_persist_directory = chroma_persist_directory
         self.collection_name = collection_name
         
-        # Initialize OpenAI client
         openai.api_key = self.openai_api_key
         
-        # Initialize ChromaDB client
         self.chroma_client = chromadb.PersistentClient(
             path=chroma_persist_directory,
             settings=Settings(anonymized_telemetry=False)
         )
         
-        # Initialize or get collection
         self.collection = None
         self._init_collection()
     
     def _init_collection(self):
         """Initialize or get the ChromaDB collection"""
         try:
-            # Try to get existing collection
+
             self.collection = self.chroma_client.get_collection(self.collection_name)
             logger.info(f"Loaded existing collection '{self.collection_name}' with {self.collection.count()} documents")
         except Exception:
-            # Create new collection if it doesn't exist
+
             self.collection = self.chroma_client.create_collection(
                 name=self.collection_name,
                 metadata={"description": "Polkadot documentation embeddings"}
@@ -70,7 +67,6 @@ class EmbeddingManager:
             batch = texts[i:i + batch_size]
             
             try:
-                # Add retry logic for rate limiting
                 max_retries = 3
                 for attempt in range(max_retries):
                     try:
@@ -105,7 +101,6 @@ class EmbeddingManager:
                         else:
                             raise e
                 
-                # Small delay between batches to avoid rate limiting
                 time.sleep(0.1)
                 
             except Exception as e:
@@ -113,7 +108,6 @@ class EmbeddingManager:
                     logger.error(f"Insufficient quota error in embeddings batch: {e}")
                     raise
                 logger.error(f"Failed to generate embeddings for batch {i//batch_size + 1}: {e}")
-                # Add empty embeddings for failed batch
                 embeddings.extend([[0.0] * 1536] * len(batch))  # ada-002 has 1536 dimensions
         
         def _normalize(vec):
@@ -133,7 +127,6 @@ class EmbeddingManager:
             True if successful, False otherwise
         """
         try:
-            # Extract texts for embedding generation
             texts = [chunk['content'] for chunk in chunks]
             
             logger.info(f"Generating embeddings for {len(texts)} chunks...")
@@ -143,18 +136,15 @@ class EmbeddingManager:
                 logger.error(f"Mismatch between chunks ({len(chunks)}) and embeddings ({len(embeddings)})")
                 return False
             
-            # Prepare data for ChromaDB
             ids = []
             documents = []
             metadatas = []
             
             for i, chunk in enumerate(chunks):
-                # Generate unique ID for each chunk
                 chunk_id = str(uuid.uuid4())
                 ids.append(chunk_id)
                 documents.append(chunk['content'])
                 
-                # Prepare metadata (ChromaDB doesn't support nested dicts)
                 metadata = {}
                 for key, value in chunk['metadata'].items():
                     if isinstance(value, (str, int, float, bool)):
@@ -164,7 +154,6 @@ class EmbeddingManager:
                 
                 metadatas.append(metadata)
             
-            # Add to collection
             logger.info(f"Adding {len(chunks)} chunks to ChromaDB collection...")
             self.collection.add(
                 ids=ids,
@@ -196,12 +185,10 @@ class EmbeddingManager:
             List of similar chunks with content, metadata, and similarity scores
         """
         try:
-            # If both search flags are false, return empty results
             if not Config.SEARCH_STATIC_DATA and not Config.SEARCH_DYNAMIC_DATA:
                 logger.info("Both static and dynamic search are disabled")
                 return []
 
-            # Generate embedding for the query
             query_embedding = self.generate_embeddings([query])[0]
             if isinstance(query_embedding, list):
                 query_embedding = np.array(query_embedding)
@@ -210,7 +197,6 @@ class EmbeddingManager:
             
             results = []
             
-            # Search in static collection if enabled
             if Config.SEARCH_STATIC_DATA and self.collection_name == Config.CHROMA_COLLECTION_NAME:
                 static_results = self.collection.query(
                     query_embeddings=[query_embedding],
@@ -229,7 +215,6 @@ class EmbeddingManager:
                         results.append(result)
                     logger.info(f"Found {len(results)} chunks from static data")
 
-            # Search in dynamic collection if enabled
             if Config.SEARCH_DYNAMIC_DATA and self.collection_name == Config.CHROMA_DYNAMIC_COLLECTION_NAME:
                 dynamic_results = self.collection.query(
                     query_embeddings=[query_embedding],
@@ -248,11 +233,9 @@ class EmbeddingManager:
                         results.append(result)
                     logger.info(f"Found {len(results)} chunks from dynamic data")
 
-            # Sort all results by similarity score and take top n_results
             results.sort(key=lambda x: x['similarity_score'], reverse=True)
             results = results[:n_results]
 
-            # Log the sources of returned results
             static_count = sum(1 for r in results if r['source'] == 'static')
             dynamic_count = sum(1 for r in results if r['source'] == 'dynamic')
             logger.info(f"Returning {static_count} static and {dynamic_count} dynamic results")
@@ -271,12 +254,10 @@ class EmbeddingManager:
         try:
             count = self.collection.count()
             
-            # Get sample of metadata to understand structure
             sample_results = self.collection.get(limit=10, include=["metadatas"])
             
             source_counts = {}
             if sample_results['metadatas']:
-                # Get all metadata to count sources
                 all_results = self.collection.get(include=["metadatas"])
                 for metadata in all_results['metadatas']:
                     source = metadata.get('source', 'unknown')
@@ -298,11 +279,9 @@ class EmbeddingManager:
     def clear_collection(self):
         """Clear all data from the collection"""
         try:
-            # Delete the collection
             self.chroma_client.delete_collection(self.collection_name)
             logger.info(f"Deleted collection '{self.collection_name}'")
             
-            # Recreate empty collection
             self._init_collection()
             logger.info(f"Recreated empty collection '{self.collection_name}'")
             

@@ -81,7 +81,7 @@ async def processUserQuery(
         if conversationHistory and qa_generator:
             log_step("query_analysis_start", {})
             try:
-                analyzed_query = qa_generator.analyze_query_with_memory(
+                analyzed_query = qa_generator.analyze_query_with_context(
                     analyzed_query,
                     conversationHistory
                 )

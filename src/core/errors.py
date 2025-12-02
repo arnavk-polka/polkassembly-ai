@@ -1,7 +1,3 @@
-"""
-Utility functions for handling API errors, specifically OpenAI quota errors.
-"""
-
 import openai
 from typing import Optional
 
@@ -16,7 +12,6 @@ def is_insufficient_quota_error(error: Exception) -> bool:
     Returns:
         True if it's an insufficient quota error, False otherwise
     """
-    # Check if it's an OpenAI APIError
     if isinstance(error, openai.APIError):
         error_code = getattr(error, 'status_code', None)
         error_body = getattr(error, 'body', None) or getattr(error, 'response', None)
@@ -34,18 +29,14 @@ def is_insufficient_quota_error(error: Exception) -> bool:
                     if 'insufficient_quota' in error_body.lower() or 'exceeded your current quota' in error_body.lower():
                         return True
     
-    # Check error string representation (handles cases where error is formatted as string)
     error_str = str(error).lower()
     
-    # Check for insufficient_quota in error message
     if 'insufficient_quota' in error_str:
         return True
     
-    # Check for quota exceeded message
     if 'exceeded your current quota' in error_str:
         return True
     
-    # Check for error code 429 with quota-related messages
     if 'error code: 429' in error_str and ('quota' in error_str or 'insufficient' in error_str):
         return True
     

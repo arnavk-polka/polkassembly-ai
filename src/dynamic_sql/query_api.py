@@ -1,6 +1,3 @@
-"""
-Simple API wrapper for the Query2SQL system
-"""
 import json
 from logging import Logger
 import sys
@@ -9,7 +6,6 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 try:
-    # Try relative import first (when imported as module)
     from .query2sql import Query2SQL
 except ImportError:
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,9 +13,7 @@ except ImportError:
     from query2sql import Query2SQL
 
 
-# Add SlackBot for error notifications
 try:
-    # Try relative import first (when imported as module)
     from ..integrations.slack_bot import SlackBot
 except ImportError:
     SlackBot = None
@@ -61,23 +55,18 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
         dict: Response containing SQL query, results, and natural language answer
     """
     try:
-        # Route to appropriate processor based on table
         if table == 'voting_data':
             from .query2sql import VoteQuery2SQL
             print("Extracting from voting table")
             processor = VoteQuery2SQL()
         else:
-            # Default to governance data processor
-            # Pass embedding_manager for contextual SQL generation
             processor = Query2SQL(embedding_manager=embedding_manager)
         
-        # Process the question with conversation history
         result = processor.process_query(question, conversation_history)
         
         return result
         
     except Exception as e:
-        # Send error notification to Slack
         send_error_to_slack(question, str(e), f"Query2SQL-{table or 'governance'}")
         
         return {
@@ -97,11 +86,6 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
 def main():
    
     question = "How much they ask in clarys resubmission proposal"
-    # question = "did polkassembly submitted any proposal in 2025?"
-    # question = "give me proosals which were submitted last week"
-    # question = "is there any proposal who asked for more than 1 million usd"
-    # question = "how many proposal were submitted in the month of August 2025. can you name few?"
-    # question = "unique accounts list who have voted in last 60 days"
     result = ask_question(question)
     print(f"\nQuery: {question}")
     print(f"SQL Queries: {result.get('sql_queries', [])}")
@@ -111,9 +95,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-
-
-
-
-
-#The query returned a total of 10 results, however, it seems that the specific amounts requested in these proposals are not available (represented as \'nan\' in the data). \n\nLet\'s look at the three most relevant proposals:\n\n1. The proposal titled "SmallTipper" with ID 502 was executed on March 6, 2025. Unfortunately, the requested amount is not specified in the data.\n2. Another proposal, also titled "SmallTipper" with ID 496, was executed on February 19, 2025. Again, the requested amount is not specified.\n3. A proposal titled "Test" with ID 467 timed out and was not executed. This proposal was submitted on November 5, 2024, and the requested amount is also not specified.\n\nUnfortunately, based on the available data, we cannot determine if any of these proposals requested more than 1 million USD. To get a more accurate answer, we would need more detailed data about the requested amounts in these proposals. \n\nRemember, in Polkadot/Kusama governance, proposals are a crucial part of the decision-making process. They allow network participants to suggest changes and improvements, which are then voted on by the community.

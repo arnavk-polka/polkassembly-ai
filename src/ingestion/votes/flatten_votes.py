@@ -43,28 +43,24 @@ def process_vote_data(json_file_path: str, output_dir: str):
 
     logger.info(f"Found {len(vote_list)} vote records to process.")
 
-    # User-defined list of columns to extract
     fields = [
         "balance.value", "createdAt", "decision", "isDelegated", "postDetails.content",
         "postDetails.dataSource", "postDetails.id", "postDetails.index", "postDetails.metrics",
         "postDetails.network", "postDetails.proposalType", "postDetails.title", "postDetails.userId",
         "postDetails.publicUser.addresses", "postDetails.publicUser.id", "postDetails.publicUser.username",
         "postDetails.publicUser.rank", "postDetails.publicUser.profileScore", "voter", "voterAddress",
-        "lockPeriod"  # Added to be available for calculation and in the output
+        "lockPeriod"
     ]
 
     extracted_data = []
     for record in vote_list:
         new_record = {}
         
-        # Get balance and lockPeriod for calculation
         balance_value = get_value_from_path(record, "balance.value")
         lock_period = get_value_from_path(record, "lockPeriod")
 
-        # Calculate the adjusted balance based on lockPeriod
         adjusted_balance = None
         try:
-            # Coerce to numeric, turning non-numbers into NaN
             balance_numeric = pd.to_numeric(balance_value, errors='coerce')
             lock_numeric = pd.to_numeric(lock_period, errors='coerce')
 
@@ -72,18 +68,16 @@ def process_vote_data(json_file_path: str, output_dir: str):
                 multiplier = 0.1 if lock_numeric == 0 else lock_numeric
                 adjusted_balance = balance_numeric * multiplier
         except (TypeError, ValueError):
-            pass  # Keep adjusted_balance as None if there's an issue
+            pass
 
         for field_path in fields:
             new_column_name = field_path.replace('.', '_')
 
-            # Use the calculated value for balance.value, otherwise extract normally
             if field_path == "balance.value":
                 value = adjusted_balance
             else:
                 value = get_value_from_path(record, field_path)
 
-            # If the value is a dict or list, convert it to a JSON string
             if isinstance(value, (dict, list)):
                 value = json.dumps(value)
             
@@ -92,13 +86,11 @@ def process_vote_data(json_file_path: str, output_dir: str):
 
     df = pd.DataFrame(extracted_data)
     
-    # Report any columns that are entirely missing
     desired_columns_underscored = [f.replace('.', '_') for f in fields]
     found_cols = set(df.columns)
     
     missing_cols_report = []
     for i, col_name in enumerate(desired_columns_underscored):
-        # Check if the column was created and if it contains any non-null values
         if col_name not in found_cols or df[col_name].isnull().all():
             missing_cols_report.append(fields[i])
             
@@ -107,7 +99,6 @@ def process_vote_data(json_file_path: str, output_dir: str):
 
     logger.info(f"Created DataFrame with {len(df)} rows and {len(df.columns)} columns.")
 
-    # Create 'index_voterAddress' column from 'postDetails_index' and 'voterAddress'
     index_col = 'postDetails_index'
     voter_col = 'voterAddress'
     
@@ -121,7 +112,6 @@ def process_vote_data(json_file_path: str, output_dir: str):
         if missing_for_concat:
             logger.warning(f"Could not create 'index_voterAddress' column because {', '.join(missing_for_concat)} were not found.")
 
-    # Save to CSV in the specified output directory
     base_filename = os.path.basename(json_file_path)
     csv_filename = os.path.splitext(base_filename)[0] + '.csv'
     output_path = os.path.join(output_dir, csv_filename)
