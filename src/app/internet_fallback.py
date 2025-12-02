@@ -120,7 +120,9 @@ async def generate_internet_search_response(
     route: Optional[str] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
     sql_query: Optional[str] = None,
-    validator_reason: Optional[str] = None
+    validator_reason: Optional[str] = None,
+    connection_error: bool = False,
+    data_fetch_failed: bool = False
 ) -> Dict[str, Any]:
     """
     Generate response using LLM when no data is available.
@@ -160,10 +162,15 @@ async def generate_internet_search_response(
         # Build SQL context if available
         sql_context = ""
         if sql_query:
-            sql_context = f"\n\nSQL QUERY ATTEMPTED:\n{sql_query}\n\nNote: This SQL query was generated to answer the user's question but returned no results. The query shows what filters were applied (network, date range, proposal type, status, etc.). Use this to understand exactly what the user is asking for."
+            if connection_error or data_fetch_failed:
+                sql_context = f"\n\nSQL QUERY ATTEMPTED:\n{sql_query}\n\nCRITICAL: I was unable to fetch the required on-chain data to answer the user's question. This could be due to a database connection failure, query execution error, or other data access issue. Do NOT make up data, claim there are zero results, or invent numbers. Instead, clearly explain that I was unable to access the required data at this time."
+            else:
+                sql_context = f"\n\nSQL QUERY ATTEMPTED:\n{sql_query}\n\nNote: This SQL query was generated to answer the user's question but returned no results. The query shows what filters were applied (network, date range, proposal type, status, etc.). Use this to understand exactly what the user is asking for."
         
         validator_context = ""
-        if validator_reason:
+        if connection_error or data_fetch_failed:
+            validator_context = f"\n\nCRITICAL CONTEXT: I was unable to fetch the required on-chain governance data. This could be due to a connection failure, query error, or other data access issue. Do NOT invent data, claim there are zero votes/results, or make up numbers. Instead, clearly explain that I could not access the required data at this time and provide general information based on my knowledge if relevant."
+        elif validator_reason:
             validator_context = f"\n\nVALIDATOR NOTE:\n{validator_reason}\n\nThis explains why the SQL query didn't return results."
         
         from ..prompts.internet_fallback_prompt import PROMPT_TEMPLATE as llm_prompt_template

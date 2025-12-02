@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Authentication module for Polkassembly AI API.
 Provides token-based authentication for all API endpoints.
@@ -12,7 +11,6 @@ from ..core.config import Config
 
 logger = logging.getLogger(__name__)
 
-# Initialize HTTP Bearer security scheme
 security = HTTPBearer(auto_error=False)
 
 class AuthenticationError(Exception):
@@ -30,14 +28,12 @@ def verify_token(token: str) -> bool:
         bool: True if token is valid, False otherwise
     """
     if not Config.ENABLE_AUTHENTICATION:
-        # If authentication is disabled, allow all requests
         return True
     
     if not Config.POLKASSEMBLY_AI_TOKEN:
         logger.error("POLKASSEMBLY_AI_TOKEN not configured but authentication is enabled")
         return False
     
-    # Simple token comparison - in production, you might want more sophisticated validation
     return token == Config.POLKASSEMBLY_AI_TOKEN
 
 async def authenticate_request(
@@ -55,12 +51,10 @@ async def authenticate_request(
     Raises:
         HTTPException: If authentication fails
     """
-    # Skip authentication if disabled
     if not Config.ENABLE_AUTHENTICATION:
         logger.debug("Authentication disabled, allowing request")
         return True
     
-    # Check if credentials are provided
     if not credentials:
         logger.warning("No authorization credentials provided")
         raise HTTPException(
@@ -69,7 +63,6 @@ async def authenticate_request(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Verify the token
     if not verify_token(credentials.credentials):
         logger.warning(f"Invalid token provided: {credentials.credentials[:10]}...")
         raise HTTPException(

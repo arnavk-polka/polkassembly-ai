@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 FastAPI server for the Polkadot AI Chatbot system.
 Provides endpoints for querying the knowledge base and getting AI-generated answers.
@@ -7,19 +6,15 @@ Provides endpoints for querying the knowledge base and getting AI-generated answ
 import os
 import sys
 import logging
-import re
-import signal
 import traceback
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,14 +39,12 @@ from ..ops.monitoring import (
 from .query_pipeline import processUserQuery, set_reranker
 from ..core.errors import is_insufficient_quota_error, get_quota_error_message
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Global components
 static_embedding_manager: Optional[EmbeddingManager] = None
 dynamic_embedding_manager: Optional[EmbeddingManager] = None
 qa_generator: Optional[QAGenerator] = None
@@ -64,17 +57,8 @@ async def lifespan(app: FastAPI):
     global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot
     
     try:
-        logger.info("Starting Polkadot AI Chatbot API...")
-        
-        # Validate configuration
         Config.validate_config()
-        logger.info("Configuration validated")
         
-        # Content guardrails now handled by Bedrock guardrails in the query endpoint
-        logger.info("Bedrock guardrails will be used for content moderation")
-        
-        # Initialize static embedding manager
-        logger.info("Initializing static embedding manager...")
         static_embedding_manager = EmbeddingManager(
             openai_api_key=Config.OPENAI_API_KEY,
             embedding_model=Config.OPENAI_EMBEDDING_MODEL,
@@ -82,8 +66,6 @@ async def lifespan(app: FastAPI):
             collection_name=Config.CHROMA_COLLECTION_NAME
         )
         
-        # Initialize dynamic embedding manager
-        logger.info("Initializing dynamic embedding manager...")
         dynamic_embedding_manager = EmbeddingManager(
             openai_api_key=Config.OPENAI_API_KEY,
             embedding_model=Config.OPENAI_EMBEDDING_MODEL,
@@ -94,44 +76,30 @@ async def lifespan(app: FastAPI):
         # Check if collections have data
         if not static_embedding_manager.collection_exists():
             logger.warning("Static ChromaDB collection is empty. Please run create_embeddings.py first.")
-        else:
-            stats = static_embedding_manager.get_collection_stats()
-            logger.info(f"Loaded static collection with {stats.get('total_chunks', 0)} chunks")
         
         if not dynamic_embedding_manager.collection_exists():
             logger.warning("Dynamic ChromaDB collection is empty. Please run create_dynamic_embeddings.py first.")
-        else:
-            stats = dynamic_embedding_manager.get_collection_stats()
-            logger.info(f"Loaded dynamic collection with {stats.get('total_chunks', 0)} chunks")
         
-        # Initialize QA generator
-        logger.info("Initializing QA generator...")
         qa_generator = QAGenerator(
             openai_api_key=Config.OPENAI_API_KEY,
             model=Config.OPENAI_MODEL,
             temperature=0.1,
             enable_web_search=Config.ENABLE_WEB_SEARCH,
             web_search_context_size=Config.WEB_SEARCH_CONTEXT_SIZE,
-            enable_memory=Config.USE_MEM0 and bool(Config.MEM0_API_KEY)  # Enable memory only if USE_MEM0 is true and API key is provided
+            enable_memory=Config.USE_MEM0 and bool(Config.MEM0_API_KEY)
         )
         
-        # Initialize Slack bot and send startup notification
         slack_bot = initialize_slack_bot()
         send_startup_notification(slack_bot)
         
-        # Initialize semantic reranker
         try:
-            logger.info("Initializing semantic reranker...")
             from ..core.reranking.semantic_reranker import SemanticReranker
             reranker = SemanticReranker()
             set_reranker(reranker)
-            logger.info("Semantic reranker initialized successfully")
         except ImportError as e:
             logger.warning(f"Semantic reranker not available: {e}. Reranking will be skipped.")
         except Exception as e:
             logger.warning(f"Failed to initialize semantic reranker: {e}. Reranking will be skipped.")
-        
-        logger.info("API startup completed successfully")
         
     except Exception as e:
         logger.error(f"Failed to initialize API: {e}")
@@ -140,7 +108,6 @@ async def lifespan(app: FastAPI):
         send_startup_error_notification(slack_bot, e)
         raise e
     
-    # Application is now ready
     try:
         yield
     except Exception as e:
@@ -148,10 +115,8 @@ async def lifespan(app: FastAPI):
         logger.error(traceback.format_exc())
         set_shutdown_reason(f"Runtime error: {type(e).__name__}: {str(e)}", e)
     
-    # Shutdown
     send_shutdown_notification(slack_bot)
 
-# Initialize FastAPI app (after lifespan function is defined)
 app = FastAPI(
     title="Polkadot AI Chatbot API",
     description="AI-powered chatbot for Polkadot ecosystem questions",
@@ -161,16 +126,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Request/Response models
 class ConversationMessage(BaseModel):
     query: str = Field(..., description="Previous user query")
     response: str = Field(..., description="Previous AI response")
@@ -263,15 +226,11 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
         is_allowed, remaining_requests = check_rate_limit(request.user_id)
         
         if not is_allowed:
-            # Rate limit exceeded
             logger.warning(f"Rate limit exceeded for user {request.user_id} from IP {request.client_ip}")
             raise HTTPException(
                 status_code=429, 
                 detail="Rate limit exceeded. Please try again later."
             )
-        
-        # 🛡️ Bedrock Guardrail content moderation
-        logger.info(f"Processing query from user {request.user_id}: '{request.question[:50]}...' (remaining: {remaining_requests})")
         
         guardrail_result = await check_with_guardrail_async(request.question)
         
@@ -280,12 +239,10 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             reason = guardrail_result.get('reason', 'Content policy violation')
             logger.warning(f"Query blocked by guardrail for user {request.user_id} from IP {request.client_ip}: {reason}")
             
-            # Generate natural language explanation using GPT-3.5-turbo
             try:
                 answer = await generate_user_friendly_block_message(violation_details, request.question)
             except Exception as e:
                 logger.error(f"Failed to generate user-friendly block message: {e}")
-                # Fallback to generic message
                 answer = "Your query was blocked because it violates our content policy. Please revise your query to comply with our terms of service. Continued violations may result in your IP being blocked."
             
             return QueryResponse(
@@ -307,12 +264,9 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             )
         elif guardrail_result["status"] == "error":
             logger.error(f"Guardrail error for user {request.user_id}: {guardrail_result['reason']}")
-            # Continue processing if guardrail fails - don't block legitimate queries due to technical issues
         
-    
         conversation_history_dicts = None
         if request.conversation_history:
-            logger.info(f"Received conversation history with {len(request.conversation_history)} messages")
             conversation_history_dicts = []
             for i, msg in enumerate(request.conversation_history):
                 if msg.query:
@@ -327,11 +281,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                         'content': msg.response,
                         'timestamp': msg.timestamp
                     })
-            logger.info(f"Converted to {len(conversation_history_dicts)} dict entries")
-        else:
-            logger.info("No conversation history received")
         
-        # Use new query processing pipeline
         try:
             qa_result = await processUserQuery(
                 userMessage=request.question,
@@ -344,7 +294,6 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 user_id=request.user_id
             )
         except Exception as qa_error:
-            # Check if it's an insufficient quota error
             if is_insufficient_quota_error(qa_error):
                 logger.error(f"Insufficient quota error in processUserQuery: {qa_error}")
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -362,13 +311,9 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                     search_method="quota_error"
                 )
             
-            # Log the error locally
             logger.error(f"Error in processUserQuery: {qa_error}")
-            
-            # Send error details to Slack if available
             send_query_error_notification(slack_bot, request.question, request.user_id, qa_error)
             
-            # Return user-friendly error response
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
             return QueryResponse(
                 answer="I am currently having problems processing your prompt. Try it again in your next prompt.",
@@ -385,10 +330,9 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 chunks_used=0,
                 processing_time_ms=processing_time,
                 timestamp=datetime.now().isoformat(),
-                search_method="query_processor_error"
+                    search_method="query_processor_error"
             )
         
-        # Format sources if requested
         sources = []
         if request.include_sources:
             sources = [
@@ -401,18 +345,11 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 for src in qa_result.get('sources', [])
             ]
         
-        # Use processing time from qa_result if available, otherwise calculate
         processing_time = qa_result.get('processing_time_ms', (datetime.now() - start_time).total_seconds() * 1000)
         
-        logger.info(f"Query processed in {processing_time:.2f}ms for user {request.user_id} (remaining: {remaining_requests}, route: {qa_result.get('route', 'unknown')})")
-        
-
         answer = qa_result['answer']
-        # No need to strip markers - we don't use them anymore
         if answer:
             answer = answer.strip()
-        
-        print(answer)
 
         return QueryResponse(
             answer=answer,
@@ -426,13 +363,12 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
             processing_time_ms=processing_time,
             timestamp=datetime.now().isoformat(),
             search_method=qa_result.get('search_method', 'unknown'),
-            original_answer=None  # No longer needed - using conversation history pattern
+            original_answer=None
         )
         
     except Exception as e:
         logger.error(f"Error processing query: {e}")
         
-        # Check if it's an insufficient quota error
         if is_insufficient_quota_error(e):
             try:
                 _, remaining_requests = check_rate_limit(request.user_id)
@@ -453,13 +389,11 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 search_method="quota_error"
             )
         
-        # Try to get remaining requests if possible, otherwise default to 0
         try:
             _, remaining_requests = check_rate_limit(request.user_id)
         except:
             remaining_requests = 0
         
-        # Return helpful response even on error
         return QueryResponse(
             answer="I'd be happy to help you with Polkadot questions! What would you like to know about governance, staking, or parachains?",
             sources=[],
@@ -490,14 +424,10 @@ async def search_documents(request: SearchRequest, authenticated: bool = Depends
         if not static_embedding_manager.collection_exists() and not dynamic_embedding_manager.collection_exists():
             raise HTTPException(status_code=503, detail="No data available. Please create embeddings first.")
         
-        logger.info(f"Processing search: '{request.query[:50]}...'")
-        
-        # Prepare filter if source filter is specified
         filter_metadata = None
         if request.source_filter:
             filter_metadata = {"source": request.source_filter}
         
-        # Search for chunks
         static_chunks = static_embedding_manager.search_similar_chunks(
             query=request.query,
             n_results=request.n_results,
@@ -510,7 +440,6 @@ async def search_documents(request: SearchRequest, authenticated: bool = Depends
             filter_metadata=filter_metadata
         )
 
-        # Combine and sort chunks by similarity score
         all_chunks = static_chunks + dynamic_chunks
         all_chunks.sort(key=lambda x: x['similarity_score'], reverse=True)
         results = [
@@ -523,8 +452,6 @@ async def search_documents(request: SearchRequest, authenticated: bool = Depends
         ]
         
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
-        
-        logger.info(f"Search processed in {processing_time:.2f}ms, found {len(results)} results")
         
         return SearchResponse(
             results=results,
@@ -605,7 +532,6 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     
-    
     def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -621,7 +547,7 @@ if __name__ == "__main__":
     
     sys.excepthook = handle_unhandled_exception
     
-    logger.info("Starting Polkadot AI Chatbot API server...")
+    logger.info("Starting Klara API server...")
     try:
         uvicorn.run(
             app,
@@ -638,4 +564,4 @@ if __name__ == "__main__":
         
         send_crash_notification(type(e), e, traceback_str)
         
-        sys.exit(1) 
+        sys.exit(1)

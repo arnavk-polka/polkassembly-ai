@@ -138,7 +138,7 @@ class Query2SQL:
         self.gemini_client = None
         
         # Timeout configuration
-        self.api_timeout = float(os.getenv('API_TIMEOUT', '10'))  # Default 10 seconds
+        self.api_timeout = float(os.getenv('API_TIMEOUT', '30'))  # Default 30 seconds for database connections
         
         # Initialize clients based on SQL_MODEL preference
         if self.sql_model == 'chatgpt':
@@ -782,6 +782,18 @@ class Query2SQL:
             
             conn = psycopg2.connect(**db_config_with_timeout)
             yield conn
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database connection error: {e}")
+            if "timed out" in str(e) or "Operation timed out" in str(e):
+                logger.error(f"Connection timeout after {self.api_timeout} seconds. Database may be unreachable or network issues.")
+            if conn:
+                conn.rollback()
+            raise
+        except psycopg2.Error as e:
+            logger.error(f"Database connection error: {e}")
+            if conn:
+                conn.rollback()
+            raise
         except Exception as e:
             logger.error(f"Database connection error: {e}")
             if conn:
@@ -1917,7 +1929,7 @@ class VoteQuery2SQL:
         self.gemini_client = None
         
         # Timeout configuration
-        self.api_timeout = float(os.getenv('API_TIMEOUT', '10'))  # Default 10 seconds
+        self.api_timeout = float(os.getenv('API_TIMEOUT', '30'))  # Default 30 seconds for database connections
         
         # Initialize Gemini as primary for voting data
         if GeminiClient is not None:
@@ -1991,11 +2003,21 @@ class VoteQuery2SQL:
     
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections"""
+        """Context manager for database connections with timeout"""
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_config)
+            db_config_with_timeout = self.db_config.copy()
+            db_config_with_timeout['connect_timeout'] = int(self.api_timeout)
+            
+            conn = psycopg2.connect(**db_config_with_timeout)
             yield conn
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database connection error: {e}")
+            if "timed out" in str(e) or "Operation timed out" in str(e):
+                logger.error(f"Connection timeout after {self.api_timeout} seconds. Database may be unreachable or network issues.")
+            if conn:
+                conn.rollback()
+            raise
         except psycopg2.Error as e:
             logger.error(f"Database connection error: {e}")
             if conn:
@@ -2200,8 +2222,8 @@ class VoteQuery2SQL:
             return ["SELECT COUNT(*) FROM voting_data;"]  # Fallback query
 
 
-    def execute_sql_query(self, sql_query: str) -> Tuple[List[List[Any]], List[str]]:
-        """Execute SQL query and return results with column names"""
+    def execute_sql_query(self, sql_query: str) -> Tuple[List[List[Any]], List[str], Optional[str]]:
+        """Execute SQL query and return results with column names and error type"""
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -2215,20 +2237,30 @@ class VoteQuery2SQL:
                     results = cur.fetchall()
                     
                     logger.info(f"Query executed successfully: {len(results)} rows returned")
-                    return results, columns
+                    return results, columns, None
                     
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            error_str = str(e).lower()
+            if "timed out" in error_str or "operation timed out" in error_str or "connection" in error_str:
+                logger.error(f"Database connection error: {e}")
+                return [], [], "connection_error"
+            logger.error(f"Database error: {e}")
+            return [], [], "database_error"
         except Exception as e:
             logger.error(f"Error executing SQL query: {e}")
-            return [], []
+            return [], [], "query_error"
 
-    def execute_sql_queries(self, sql_queries: List[str]) -> List[Tuple[List[List[Any]], List[str]]]:
-        """Execute multiple SQL queries and return all results"""
+    def execute_sql_queries(self, sql_queries: List[str]) -> Tuple[List[Tuple[List[List[Any]], List[str]]], Optional[str]]:
+        """Execute multiple SQL queries and return all results with error type"""
         all_results = []
+        connection_error = None
         for i, query in enumerate(sql_queries):
             logger.info(f"Executing query {i+1}/{len(sql_queries)}")
-            results, columns = self.execute_sql_query(query)
+            results, columns, error_type = self.execute_sql_query(query)
             all_results.append((results, columns))
-        return all_results
+            if error_type == "connection_error" and connection_error is None:
+                connection_error = error_type
+        return all_results, connection_error
 
     def generate_natural_response(self, natural_query: str, sql_query: str, results: List[List[Any]], 
                                 columns: List[str], conversation_history: Optional[List[Dict[str, Any]]] = None) -> str:
@@ -2237,6 +2269,12 @@ class VoteQuery2SQL:
             # If no results, provide a helpful message
             if not results:
                 return f"I didn't find any voting records matching your query '{natural_query}'. This could mean there are no votes matching your criteria, or the voting data might not contain the specific information you're looking for."
+            
+            # Check if this is a COUNT(*) query - if so, extract the count value from the first row
+            is_count_query = 'COUNT(*)' in sql_query.upper() or (len(columns) == 1 and 'count' in columns[0].lower())
+            count_value = None
+            if is_count_query and results and len(results) > 0 and len(results[0]) > 0:
+                count_value = results[0][0] if isinstance(results[0][0], (int, float)) else None
             
             # Check if total_count is available from window function
             total_count_from_window = None
@@ -2249,8 +2287,13 @@ class VoteQuery2SQL:
                             total_count_from_window = results[0][i]
                             break
             
-            # Use window function count if available, otherwise use result count
-            actual_total_count = total_count_from_window if total_count_from_window is not None else len(results)
+            # Use count value from COUNT(*) query, window function, or result count
+            if count_value is not None:
+                actual_total_count = int(count_value)
+            elif total_count_from_window is not None:
+                actual_total_count = total_count_from_window
+            else:
+                actual_total_count = len(results)
             
             # Convert results to a more readable format
             displayed_count = min(10, len(results))
@@ -2419,10 +2462,25 @@ class VoteQuery2SQL:
             sql_queries = self._generate_sql_queries_only_voting(natural_query, conversation_history)
             
             # Step 2: Execute SQL queries
-            all_results = self.execute_sql_queries(sql_queries)
+            all_results, connection_error = self.execute_sql_queries(sql_queries)
             
             # Step 2.5: Check data presence after execution
             total_result_count = sum(len(results) for results, _ in all_results)
+            if connection_error:
+                logger.error("Database connection failed, triggering fallback flow")
+                return {
+                    "original_query": natural_query,
+                    "sql_query": sql_queries[0] if sql_queries else None,
+                    "sql_queries": sql_queries,
+                    "result_count": 0,
+                    "results": [],
+                    "columns": [],
+                    "natural_response": "",
+                    "success": False,
+                    "error": "connection_error",
+                    "requires_fallback": True,
+                    "connection_error": True
+                }
             if total_result_count == 0:
                 logger.info("No results found, triggering fallback flow")
                 return {
@@ -2597,7 +2655,9 @@ Generate the corrected SQL queries as a JSON array:
                     
                     # Try to execute the queries
                     try:
-                        all_results = self.execute_sql_queries(sql_queries)
+                        all_results, connection_error = self.execute_sql_queries(sql_queries)
+                        if connection_error:
+                            raise Exception("Database connection failed")
                         # If we get here, queries executed successfully
                         logger.info(f"Voting SQL queries executed successfully on attempt {attempt + 1}")
                         return sql_queries, all_results
@@ -2627,7 +2687,9 @@ Generate the corrected SQL queries as a JSON array:
                         logger.error(f"All {max_retries} attempts failed for voting data. Trying single query execution.")
                         try:
                             single_query = response_content.strip()
-                            all_results = self.execute_sql_queries([single_query])
+                            all_results, connection_error = self.execute_sql_queries([single_query])
+                            if connection_error:
+                                raise Exception("Database connection failed")
                             return [single_query], all_results
                         except Exception as e:
                             raise e
@@ -2677,7 +2739,9 @@ Generate the corrected SQL queries as a JSON array:
                             
                             # Try to execute the queries
                             try:
-                                all_results = self.execute_sql_queries(sql_queries)
+                                all_results, connection_error = self.execute_sql_queries(sql_queries)
+                                if connection_error:
+                                    raise Exception("Database connection failed")
                                 logger.info(f"Voting SQL queries executed successfully with fallback model")
                                 return sql_queries, all_results
                             except Exception as exec_error:

@@ -8,6 +8,29 @@ from src.core.errors import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_FOLLOW_UP_QUESTIONS = [
+    "How does Polkadot's governance system work?",
+    "What are the benefits of staking DOT tokens?",
+    "How do parachains connect to Polkadot?"
+]
+
+_DEFAULT_SOURCES = [
+    {
+        'title': 'Polkassembly Main Platform',
+        'url': 'https://polkassembly.io',
+        'source_type': 'platform',
+        'similarity_score': 1.0
+    },
+    {
+        'title': 'Polkadot Governance on Polkassembly',
+        'url': 'https://polkadot.polkassembly.io',
+        'source_type': 'platform',
+        'similarity_score': 1.0
+    }
+]
+
+_FALLBACK_ANSWER = "We're unable to answer your question at this time. Please try again later or rephrase your question."
+
 
 def is_greeting_query(query: str) -> bool:
     """Check if query is a greeting"""
@@ -141,10 +164,10 @@ async def handle_generic_query_llm(
     
     log_step("generic_handler_non_greeting", {"note": "Using LLM for non-greeting generic query"})
     try:
-        # Build conversation context if available
+
         conversation_context = ""
         if conversation_history and len(conversation_history) > 0:
-            recent_messages = conversation_history[-10:]  # Last 10 messages for context
+            recent_messages = conversation_history[-10:]  
             context_parts = []
             for msg in recent_messages:
                 if isinstance(msg, dict):
@@ -185,32 +208,11 @@ async def handle_generic_query_llm(
                     "response_length": len(answer)
                 })
                 
-                follow_up_questions = [
-                    "How does Polkadot's governance system work?",
-                    "What are the benefits of staking DOT tokens?",
-                    "How do parachains connect to Polkadot?"
-                ]
-                
-                sources = [
-                    {
-                        'title': 'Polkassembly Main Platform',
-                        'url': 'https://polkassembly.io',
-                        'source_type': 'platform',
-                        'similarity_score': 1.0
-                    },
-                    {
-                        'title': 'Polkadot Governance on Polkassembly',
-                        'url': 'https://polkadot.polkassembly.io',
-                        'source_type': 'platform',
-                        'similarity_score': 1.0
-                    }
-                ]
-                
                 return {
                     'answer': answer.strip(),
-                    'sources': sources,
+                    'sources': _DEFAULT_SOURCES,
                     'confidence': 0.8,
-                    'follow_up_questions': follow_up_questions,
+                    'follow_up_questions': _DEFAULT_FOLLOW_UP_QUESTIONS,
                     'context_used': False,
                     'model_used': model_name,
                     'chunks_used': 0,
@@ -240,32 +242,11 @@ async def handle_generic_query_llm(
                 model_name = getattr(qa_generator.gemini_client, 'model_name', 'Gemini')
                 response = qa_generator.gemini_client.get_response(fallback_prompt)
                 
-                follow_up_questions = [
-                    "How does Polkadot's governance system work?",
-                    "What are the benefits of staking DOT tokens?",
-                    "How do parachains connect to Polkadot?"
-                ]
-                
-                sources = [
-                    {
-                        'title': 'Polkassembly Main Platform',
-                        'url': 'https://polkassembly.io',
-                        'source_type': 'platform',
-                        'similarity_score': 1.0
-                    },
-                    {
-                        'title': 'Polkadot Governance on Polkassembly',
-                        'url': 'https://polkadot.polkassembly.io',
-                        'source_type': 'platform',
-                        'similarity_score': 1.0
-                    }
-                ]
-                
                 return {
                     'answer': response.strip(),
-                    'sources': sources,
+                    'sources': _DEFAULT_SOURCES,
                     'confidence': 0.7,
-                    'follow_up_questions': follow_up_questions,
+                    'follow_up_questions': _DEFAULT_FOLLOW_UP_QUESTIONS,
                     'context_used': False,
                     'model_used': model_name,
                     'chunks_used': 0,
@@ -275,14 +256,10 @@ async def handle_generic_query_llm(
                 log_step("generic_handler_error", {"error": str(e)}, "error")
             
             return {
-                'answer': "Hello! I'm Klara, your AI assistant for Polkadot and Kusama governance. I can help you with questions about proposals, voting, treasury, and more. What would you like to know?",
+                'answer': _FALLBACK_ANSWER,
                 'sources': [],
                 'confidence': 0.5,
-                'follow_up_questions': [
-                    "How does Polkadot's governance system work?",
-                    "What are the benefits of staking DOT tokens?",
-                    "How do parachains connect to Polkadot?"
-                ],
+                'follow_up_questions': _DEFAULT_FOLLOW_UP_QUESTIONS,
                 'context_used': False,
                 'model_used': 'fallback',
                 'chunks_used': 0,
@@ -292,14 +269,10 @@ async def handle_generic_query_llm(
     except Exception as e:
         log_step("generic_handler_error", {"error": str(e)}, "error")
         return {
-            'answer': "Hello! I'm Klara, your AI assistant for Polkadot and Kusama governance. How can I help you today?",
+            'answer': _FALLBACK_ANSWER,
             'sources': [],
             'confidence': 0.5,
-            'follow_up_questions': [
-                "How does Polkadot's governance system work?",
-                "What are the benefits of staking DOT tokens?",
-                "How do parachains connect to Polkadot?"
-            ],
+            'follow_up_questions': _DEFAULT_FOLLOW_UP_QUESTIONS,
             'context_used': False,
             'model_used': 'error_fallback',
             'chunks_used': 0,
