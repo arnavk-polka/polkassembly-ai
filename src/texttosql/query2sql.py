@@ -2787,6 +2787,10 @@ class VoteQuery2SQL:
             if not results:
                 return f"I didn't find any voting records matching your query '{natural_query}'. This could mean there are no votes matching your criteria, or the voting data might not contain the specific information you're looking for."
             
+            is_count_query = 'COUNT(*)' in sql_query.upper() or (len(columns) == 1 and 'count' in columns[0].lower())
+            count_value = None
+            if is_count_query and results and len(results) > 0 and len(results[0]) > 0:
+                count_value = results[0][0] if isinstance(results[0][0], (int, float)) else None
             # Check if total_count is available from window function
             total_count_from_window = None
             if results and len(results) > 0 and len(results[0]) > 0:
@@ -2798,8 +2802,8 @@ class VoteQuery2SQL:
                             total_count_from_window = results[0][i]
                             break
             
-            # Use window function count if available, otherwise use result count
-            actual_total_count = total_count_from_window if total_count_from_window is not None else len(results)
+            # Use count_value from COUNT query if available, then window function count, otherwise use result count
+            actual_total_count = count_value if count_value is not None else (total_count_from_window if total_count_from_window is not None else len(results))
             
             # Convert results to a more readable format
             displayed_count = min(10, len(results))
