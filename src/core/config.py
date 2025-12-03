@@ -32,17 +32,12 @@ class Config:
     SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", 0.7))
     
     STATIC_DATA_PATH = os.getenv("STATIC_DATA_PATH", "data/joined_data/static")
-    DYNAMIC_DATA_PATH = os.getenv("DYNAMIC_DATA_PATH", "data/dynamic_kusama_polka")
-    DATA_SOURCES_PATH = DYNAMIC_DATA_PATH
-    POLKADOT_NETWORK_PATH = os.path.join(DATA_SOURCES_PATH, "polkadot_network")
-    POLKADOT_WIKI_PATH = os.path.join(DATA_SOURCES_PATH, "polkadot_wiki")
     
     ENABLE_CONTENT_FILTERING = os.getenv("ENABLE_CONTENT_FILTERING", "true").lower() == "true"
     BLOCKED_DOMAINS = os.getenv("BLOCKED_DOMAINS", "subsquare.io,subsquare.com,subsquare.network").split(",")
     PREFERRED_DOMAINS = os.getenv("PREFERRED_DOMAINS", "polkadot.io,polkadot.network,polkassembly.io").split(",")
     
-    MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", 500))
-    ENABLE_OFFENSIVE_FILTER = os.getenv("ENABLE_OFFENSIVE_FILTER", "true").lower() == "true"
+    
     
     POLKASSEMBLY_AI_TOKEN = os.getenv("POLKASSEMBLY_AI_TOKEN", "")
     ENABLE_AUTHENTICATION = os.getenv("ENABLE_AUTHENTICATION", "true").lower() == "true"

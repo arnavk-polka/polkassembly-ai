@@ -11,7 +11,6 @@ from typing import List, Dict, Any
 
 from src.core.embeddings import EmbeddingManager
 from src.core.text_chunker import TextChunker
-from src.ingestion.data_loader import DataLoader
 from src.core.config import Config
 
 logging.basicConfig(level=logging.INFO)

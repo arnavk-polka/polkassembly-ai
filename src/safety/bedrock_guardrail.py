@@ -10,7 +10,6 @@ load_dotenv()
 
 REGION = os.environ["AWS_REGION"]
 GUARDRAIL_ID = os.environ["BEDROCK_GUARDRAIL_ID"]
-GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "1")
 
 bedrock_rt = boto3.client("bedrock-runtime", region_name=REGION, config=Config(retries={"max_attempts": 3}))
 
@@ -80,7 +79,6 @@ def debug_environment():
     """Debug function to check environment variables"""
     print(f"AWS_REGION: {os.environ.get('AWS_REGION', 'NOT SET')}")
     print(f"BEDROCK_GUARDRAIL_ID: {os.environ.get('BEDROCK_GUARDRAIL_ID', 'NOT SET')}")
-    print(f"BEDROCK_GUARDRAIL_VERSION: {os.environ.get('BEDROCK_GUARDRAIL_VERSION', 'NOT SET (defaulting to 1)')}")
 
 async def generate_user_friendly_block_message(violation_details: Dict[str, Any], user_query: str) -> str:
     """

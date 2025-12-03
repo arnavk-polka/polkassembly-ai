@@ -194,10 +194,6 @@ def _resolve_data_dir(explicit: Optional[str]) -> str:
     if explicit:
         return explicit
 
-    env_dir = os.getenv("ONCHAIN_DATA_DIR")
-    if env_dir:
-        return env_dir
-
     base_path = os.getenv("BASE_PATH")
     if base_path:
         return os.path.join(base_path, "data", "onchain_data")

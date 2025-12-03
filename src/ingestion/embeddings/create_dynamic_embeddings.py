@@ -12,7 +12,6 @@ import json
 
 from src.core.embeddings import EmbeddingManager
 from src.core.text_chunker import TextChunker
-from src.ingestion.data_loader import DataLoader
 from src.core.config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -104,7 +103,7 @@ def create_dynamic_embeddings(
     """
     try:
         if not data_dir:
-            data_dir = os.path.join(project_root, Config.DYNAMIC_DATA_PATH)
+            raise ValueError("data_dir must be provided. This script requires a directory path with JSON files, or use index_dynamic_embeddings.py to index directly from PostgreSQL.")
         
         chunk_size = chunk_size or Config.CHUNK_SIZE
         chunk_overlap = chunk_overlap or Config.CHUNK_OVERLAP
