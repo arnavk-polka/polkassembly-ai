@@ -25,63 +25,63 @@ def _gemini_response_has_error(response_text: Optional[str]) -> bool:
 
 def generate_sql_with_model(system_prompt: str, openai_client, gemini_client) -> str:
     """Generate SQL using Gemini as primary and OpenAI as fallback for voting data"""
-    full_prompt = f"""{voting_sql_system_prompt}
+            full_prompt = f"""{voting_sql_system_prompt}
 
 {system_prompt}"""
-    
+            
     if gemini_client:
-        try:
+            try:
             print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (voting data)")
             logger.debug("Using Gemini for voting SQL generation")
-            response = gemini_client.get_response(full_prompt)
-            if _gemini_response_has_error(response):
-                raise RuntimeError(response)
-            return response.strip()
-        except Exception as e:
-            error_str = str(e).lower()
-            if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
-                logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model for voting: {e}")
-                try:
-                    print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (voting data)")
-                    fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
-                    response = fallback_client.get_response(full_prompt)
-                    if _gemini_response_has_error(response):
-                        raise RuntimeError(response)
-                    logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting SQL generation")
-                    return response.strip()
-                except Exception as fallback_error:
-                    logger.error(f"Fallback Gemini model also failed for voting: {fallback_error}")
-                    if openai_client:
+                response = gemini_client.get_response(full_prompt)
+                if _gemini_response_has_error(response):
+                    raise RuntimeError(response)
+                return response.strip()
+            except Exception as e:
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
+                    logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model for voting: {e}")
+                    try:
+                        print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (voting data)")
+                        fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
+                        response = fallback_client.get_response(full_prompt)
+                        if _gemini_response_has_error(response):
+                            raise RuntimeError(response)
+                        logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting SQL generation")
+                        return response.strip()
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback Gemini model also failed for voting: {fallback_error}")
+        if openai_client:
                         logger.info("Falling back to ChatGPT for voting SQL generation")
-                        print_model_usage("GPT-4", "SQL generation fallback (voting data)")
-                        response = openai_client.chat.completions.create(
-                            model="gpt-4",
-                            messages=[
-                                {"role": "system", "content": voting_sql_system_prompt},
-                                {"role": "user", "content": system_prompt}
-                            ],
-                            temperature=0.1,
-                            max_tokens=800
-                        )
-                        return response.choices[0].message.content.strip()
-                    else:
+            print_model_usage("GPT-4", "SQL generation fallback (voting data)")
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": voting_sql_system_prompt},
+                    {"role": "user", "content": system_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=800
+            )
+            return response.choices[0].message.content.strip()
+        else:
                         raise e
             else:
                 if openai_client:
                     logger.warning(f"Gemini failed, falling back to ChatGPT: {e}")
                     print_model_usage("GPT-4", "SQL generation fallback (voting data)")
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": voting_sql_system_prompt},
-                            {"role": "user", "content": system_prompt}
-                        ],
-                        temperature=0.1,
-                        max_tokens=800
-                    )
-                    return response.choices[0].message.content.strip()
-                else:
-                    raise e
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": voting_sql_system_prompt},
+                    {"role": "user", "content": system_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=800
+            )
+            return response.choices[0].message.content.strip()
+        else:
+            raise e
     
     elif openai_client:
         print_model_usage("GPT-4", "SQL generation (voting data)")

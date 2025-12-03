@@ -279,7 +279,7 @@ def main():
     parser = argparse.ArgumentParser(description='Test Klara API against gold answers')
     parser.add_argument(
         '--csv',
-        default=os.path.join(os.path.dirname(__file__), 'test_data', 'test.csv'),
+        default=os.path.join(os.path.dirname(__file__), 'data', 'test.csv'),
         help='Path to test.csv file'
     )
     parser.add_argument(

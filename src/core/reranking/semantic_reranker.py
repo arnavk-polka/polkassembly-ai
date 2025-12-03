@@ -42,6 +42,6 @@ class SemanticReranker:
 
 def get_reranker():
     """Get the global reranker instance"""
-    from ...app.query_pipeline.utils import _get_reranker
+    from ...app.pipeline.utils import _get_reranker
     return _get_reranker()
 

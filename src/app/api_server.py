@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ..core.config import Config
 from .auth import authenticate_request, get_auth_status
 from ..core.embeddings import EmbeddingManager
-from ..core.qa_generator import QAGenerator
+from ..core.generator import QAGenerator
 from ..safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
 from ..core.rate_limiter import check_rate_limit, get_client_stats
 from ..core.reranking.chunks_reranker import rerank_static_chunks
@@ -36,7 +36,7 @@ from ..ops.monitoring import (
     send_crash_notification,
     set_shutdown_reason,
 )
-from .query_pipeline import processUserQuery, set_reranker
+from .pipeline import processUserQuery, set_reranker
 from ..core.errors import is_insufficient_quota_error, get_quota_error_message
 
 logging.basicConfig(

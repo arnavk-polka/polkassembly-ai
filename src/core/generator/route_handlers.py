@@ -53,7 +53,7 @@ def determine_table_from_query(self, query: str) -> Optional[str]:
     return "governance_data"
 
 def handle_dynamic_route(self, analyzed_query: str, conversation_history: Optional[List[Dict[str, Any]]], route_result_table: Optional[str], dynamic_embedding_manager) -> Dict[str, Any]:
-    from ...dynamic_sql.query_api import ask_question
+    from ...sqlgen.query_api import ask_question
     from .follow_up_questions import generate_follow_up_questions, get_fallback_follow_ups
     
     try:
@@ -128,7 +128,7 @@ def handle_dynamic_route(self, analyzed_query: str, conversation_history: Option
         }
 
 def handle_hybrid_route(self, analyzed_query: str, conversation_history: Optional[List[Dict[str, Any]]], route_result_table: Optional[str], dynamic_embedding_manager) -> str:
-    from ...dynamic_sql.query_api import ask_question
+    from ...sqlgen.query_api import ask_question
     
     dynamic_answer = None
     dynamic_data_available = False
