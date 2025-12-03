@@ -9,14 +9,12 @@ import json
 from typing import Dict, List, Any, Union
 import logging
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Data source paths - these will be set by the user
 static_data_source: str = ""
 dynamic_data_source: str = ""
 
@@ -55,7 +53,6 @@ def concatenate_directory_data(directory: str, combine_by_subfolder: bool = Fals
     text_data = []
 
     if combine_by_subfolder:
-        # Process each subdirectory separately
         subdirs = [d for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
         logger.info(f"Found {len(subdirs)} subdirectories: {subdirs}")
         
@@ -83,7 +80,6 @@ def concatenate_directory_data(directory: str, combine_by_subfolder: bool = Fals
                         elif file_lower.endswith('.txt'):
                             content = read_text_file(file_path)
                             if content:
-                                # Add file separator for better organization
                                 file_header = f"\n\n--- FILE: {os.path.basename(file_path)} ---\n"
                                 subdir_text_data.append(file_header + content)
                             logger.info(f"Successfully processed text file: {file_path}")
@@ -92,7 +88,6 @@ def concatenate_directory_data(directory: str, combine_by_subfolder: bool = Fals
                         logger.error(f"Error processing file {file_path}: {e}")
                         continue
             
-            # Combine subdirectory data
             if subdir_text_data:
                 combined_text = f"\n\n=== {subdir.upper()} DOCUMENTATION ===\n" + "\n".join(subdir_text_data)
                 text_data.append(combined_text)
@@ -102,7 +97,6 @@ def concatenate_directory_data(directory: str, combine_by_subfolder: bool = Fals
                 json_data.extend(subdir_json_data)
                 logger.info(f"Added {len(subdir_json_data)} JSON entries from {subdir}")
     else:
-        # Original behavior - process all files together
         for root, _, files in os.walk(directory):
             for file in files:
                 file_path = os.path.join(root, file)
@@ -157,7 +151,6 @@ def save_concatenated_data(output_dir: str) -> None:
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Process static data
     static_data = get_static_data()
     static_dir = os.path.join(output_dir, 'static')
     os.makedirs(static_dir, exist_ok=True)
@@ -170,7 +163,6 @@ def save_concatenated_data(output_dir: str) -> None:
         with open(os.path.join(static_dir, 'combined.txt'), 'w', encoding='utf-8') as f:
             f.write(static_data["text_data"])
     
-    # Process dynamic data
     dynamic_data = get_dynamic_data()
     dynamic_dir = os.path.join(output_dir, 'dynamic')
     os.makedirs(dynamic_dir, exist_ok=True)
@@ -186,8 +178,6 @@ def save_concatenated_data(output_dir: str) -> None:
     logger.info(f"Concatenated data saved to: {output_dir}")
 
 if __name__ == "__main__":
-    # Example usage:
-    # 1. Set the data source paths from environment (do not hardcode paths)
     from dotenv import load_dotenv
     load_dotenv()
     static_data_source = os.getenv("STATIC_DATA_SOURCE", "")
@@ -197,5 +187,4 @@ if __name__ == "__main__":
     if not static_data_source or not dynamic_data_source or not output_dir:
         logger.error("Please set STATIC_DATA_SOURCE, DYNAMIC_DATA_SOURCE, and JOINED_OUTPUT_DIR in your environment.")
     else:
-        # 2. Save concatenated data
         save_concatenated_data(output_dir)

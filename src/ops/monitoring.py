@@ -25,14 +25,11 @@ def get_logger():
         logger = logging.getLogger(__name__)
     return logger
 
-# Startup notification tracking
 STARTUP_LOCK_FILE = Path("/tmp/polkassembly_ai_startup_notification.lock")
 startup_notification_sent = False
 
-# Global Slack bot instance
 slack_bot: Optional[SlackBot] = None
 
-# Shutdown tracking
 shutdown_reason: Optional[str] = None
 shutdown_exception: Optional[Exception] = None
 
@@ -74,7 +71,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
     lock_fd = None
     
     try:
-        # Clean up old lock files (older than 30 seconds)
         if STARTUP_LOCK_FILE.exists():
             try:
                 mtime = STARTUP_LOCK_FILE.stat().st_mtime
@@ -83,7 +79,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
                     get_logger().info(f"Startup notification was sent {age_seconds:.1f} seconds ago, skipping to avoid duplicates")
                     return
                 else:
-                    # Lock file is old, remove it
                     get_logger().info(f"Removing stale lock file (age: {age_seconds:.1f} seconds)")
                     try:
                         os.unlink(STARTUP_LOCK_FILE)
@@ -97,13 +92,11 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
                 except Exception:
                     pass
         
-        # Try to acquire exclusive lock
         try:
             lock_fd = os.open(STARTUP_LOCK_FILE, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             get_logger().info("Acquired lock for startup notification")
             
-            # Send notification
             get_logger().info("Sending startup notification to Slack...")
             bot.post_to_slack({
                 "event": "API Server Started",
@@ -114,7 +107,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
             startup_notification_sent = True
             get_logger().info("Startup notification sent to Slack successfully")
             
-            # Update lock file timestamp
             try:
                 os.write(lock_fd, str(time.time()).encode())
                 os.fsync(lock_fd)
@@ -126,7 +118,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
             return
         except Exception as e:
             get_logger().error(f"Error in lock mechanism: {e}, attempting fallback")
-            # Don't return here, fall through to fallback
         finally:
             if lock_fd is not None:
                 try:
@@ -135,7 +126,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
                 except Exception as e:
                     get_logger().warning(f"Error releasing lock: {e}")
         
-        # If we got here and notification wasn't sent, try fallback
         if not startup_notification_sent:
             get_logger().info("Attempting to send startup notification without lock (fallback)...")
             try:
@@ -157,7 +147,6 @@ def send_startup_notification(bot: Optional[SlackBot]) -> None:
         get_logger().error(f"Failed to handle startup notification: {lock_error}")
         import traceback
         get_logger().error(traceback.format_exc())
-        # Try to send anyway if lock mechanism fails
         if not startup_notification_sent:
             try:
                 get_logger().info("Attempting to send startup notification without lock (exception fallback)...")

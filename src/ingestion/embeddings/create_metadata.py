@@ -16,10 +16,8 @@ import logging
 
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -34,8 +32,8 @@ class DomainMetadataGenerator:
         """
         openai.api_key = api_key
         self.model = model
-        self.chunk_size = 3000  # Characters per chunk for analysis
-        self.samples_per_section = 3  # Number of samples from each section
+        self.chunk_size = 3000
+        self.samples_per_section = 3
     
     def smart_file_sampling(self, file_path: str) -> Dict[str, List[str]]:
         """
@@ -60,21 +58,18 @@ class DomainMetadataGenerator:
     def _sample_text_file(self, file_path: str) -> Dict[str, List[str]]:
         """Handle .txt files"""
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            # Read file in chunks to handle very large files
             content_chunks = []
             while True:
-                chunk = f.read(50000)  # Read 50KB at a time
+                chunk = f.read(50000)
                 if not chunk:
                     break
                 content_chunks.append(chunk)
         
-        # Combine chunks
         full_content = ''.join(content_chunks)
         total_length = len(full_content)
         
         logger.info(f"Text file size: {total_length:,} characters")
         
-        # Define section boundaries
         sections = {
             'beginning': (0, total_length // 4),
             'early_middle': (total_length // 4, total_length // 2),
@@ -101,25 +96,20 @@ class DomainMetadataGenerator:
         
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             try:
-                # Try to load as JSON
                 data = json.load(f)
             except json.JSONDecodeError:
-                # If not valid JSON, treat as text
                 f.seek(0)
                 return self._sample_text_file(file_path)
         
-        # Extract all text content from JSON
         text_extracts = self._extract_text_from_json(data)
         
         if not text_extracts:
             logger.warning("No meaningful text found in JSON file")
             return {"beginning": [], "early_middle": [], "late_middle": [], "end": []}
         
-        # Create sections from the extracted text
         total_extracts = len(text_extracts)
         logger.info(f"Extracted {total_extracts} text pieces from JSON")
         
-        # Divide extracts into sections
         section_size = max(1, total_extracts // 4)
         
         sections = {
@@ -131,13 +121,11 @@ class DomainMetadataGenerator:
         
         samples = {}
         for section_name, section_extracts in sections.items():
-            # Sample from each section
             if len(section_extracts) > self.samples_per_section:
                 section_samples = random.sample(section_extracts, self.samples_per_section)
             else:
                 section_samples = section_extracts
             
-            # Filter samples by length
             section_samples = [
                 sample for sample in section_samples 
                 if len(sample.strip()) >= 100
@@ -169,9 +157,7 @@ class DomainMetadataGenerator:
                 for key, value in obj.items():
                     new_path = f"{path}.{key}" if path else key
                     
-                    # If the value is a string and looks meaningful
                     if isinstance(value, str) and self._is_meaningful_text(value):
-                        # Include key context for better understanding
                         context_text = f"[{key}]: {value}"
                         text_extracts.append(context_text)
                     else:
@@ -207,20 +193,19 @@ class DomainMetadataGenerator:
             
         text = text.strip()
         
-        # Filter criteria
-        if len(text) < 10:  # Too short
+        if len(text) < 10:
             return False
-        if len(text) > 5000:  # Too long for a single extract
+        if len(text) > 5000:
             return False
-        if text.isdigit():  # Pure numbers
+        if text.isdigit():
             return False
-        if len(text.split()) < 3:  # Too few words
+        if len(text.split()) < 3:
             return False
-        if re.match(r'^[\d\-\s\.\,\:\;]+$', text):  # Only dates/numbers/punctuation
+        if re.match(r'^[\d\-\s\.\,\:\;]+$', text):
             return False
-        if text.startswith('http'):  # URLs
+        if text.startswith('http'):
             return False
-        if len(set(text.replace(' ', ''))) < 5:  # Too repetitive
+        if len(set(text.replace(' ', ''))) < 5:
             return False
             
         return True
@@ -236,24 +221,21 @@ class DomainMetadataGenerator:
         Returns:
             List of meaningful text samples
         """
-        # Split by paragraphs/sections (try different delimiters)
-        delimiters = ['\n\n\n', '\n\n', '\n---\n', '\n##', '\n#']
+        delimiters = ['\n\n\n', '\n\n', '\n---\n', '\n
         
         chunks = [content]
         for delimiter in delimiters:
-            if len(chunks[0]) > self.chunk_size * 2:  # Only split if chunks are too large
+            if len(chunks[0]) > self.chunk_size * 2:
                 new_chunks = []
                 for chunk in chunks:
                     new_chunks.extend(chunk.split(delimiter))
                 chunks = [c.strip() for c in new_chunks if len(c.strip()) > 100]
         
-        # Filter out very short or very long chunks
         filtered_chunks = [
             chunk for chunk in chunks 
             if 200 <= len(chunk) <= self.chunk_size * 2
         ]
         
-        # If not enough good chunks, use sliding window
         if len(filtered_chunks) < num_samples:
             step_size = len(content) // (num_samples + 1)
             filtered_chunks = []
@@ -264,7 +246,6 @@ class DomainMetadataGenerator:
                 if len(chunk.strip()) > 200:
                     filtered_chunks.append(chunk.strip())
         
-        # Randomly sample if we have more than needed
         if len(filtered_chunks) > num_samples:
             filtered_chunks = random.sample(filtered_chunks, num_samples)
         
@@ -287,7 +268,7 @@ class DomainMetadataGenerator:
         Analyze these {len(samples)} content samples from the {section_name} section of a document:
 
         SAMPLES:
-        {combined_samples[:4000]}  # Limit to stay within token limits
+        {combined_samples[:4000]}
         
         Based on these samples, identify:
         1. Main topics and themes
@@ -306,7 +287,7 @@ class DomainMetadataGenerator:
         
         try:
             response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",  # Use cheaper model for individual analyses
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=500
@@ -360,16 +341,13 @@ class DomainMetadataGenerator:
                 max_tokens=1000
             )
             
-            # Extract JSON from response
             response_text = response.choices[0].message.content
             
-            # Find JSON in the response
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
                 return json.loads(json_str)
             else:
-                # Fallback parsing
                 return self._parse_fallback_metadata(response_text, domain_name)
                 
         except json.JSONDecodeError as e:
@@ -383,7 +361,6 @@ class DomainMetadataGenerator:
         """Fallback parser if JSON parsing fails"""
         logger.warning("Using fallback metadata parsing")
         
-        # Extract information using regex patterns
         description_match = re.search(r'"description":\s*"([^"]*)"', response_text)
         keywords_match = re.search(r'"keywords":\s*\[(.*?)\]', response_text, re.DOTALL)
         
@@ -429,18 +406,15 @@ class DomainMetadataGenerator:
         """
         logger.info(f"Starting metadata generation for {domain_name}")
         
-        # Step 1: Smart sampling
         samples = self.smart_file_sampling(file_path)
         
-        # Step 2: Analyze each section
         section_analyses = {}
         for section_name, section_samples in samples.items():
-            if section_samples:  # Only analyze if we have samples
+            if section_samples:
                 logger.info(f"Analyzing {section_name} section...")
                 analysis = self.analyze_sample_batch(section_samples, section_name)
                 section_analyses[section_name] = analysis
         
-        # Step 3: Synthesize final metadata
         logger.info("Synthesizing final metadata...")
         final_metadata = self.synthesize_final_metadata(section_analyses, domain_name)
         
@@ -474,15 +448,13 @@ def main():
     """
     Example usage of the DomainMetadataGenerator
     """
-    # Configuration
-    API_KEY = os.getenv("OPENAI_API_KEY")  # Get from environment variable
+    API_KEY = os.getenv("OPENAI_API_KEY")
     
     if not API_KEY:
         print("❌ Error: OPENAI_API_KEY environment variable not found!")
         print("Please set it in your .env file or environment variables")
         return
     
-    # File configurations: (file_path, domain_name) - from environment
     from dotenv import load_dotenv
     load_dotenv()
     combined_static = os.getenv("COMBINED_STATIC_PATH", "")
@@ -493,30 +465,25 @@ def main():
     if combined_dynamic:
         file_configs.append((combined_dynamic, "dynamic_documentation"))
     
-    # Validate file paths
     for file_path, domain_name in file_configs:
         if not os.path.exists(file_path):
             print(f"❌ Warning: File not found: {file_path}")
             print(f"   Please check the path for {domain_name}")
     
-    # Initialize generator
     generator = DomainMetadataGenerator(
         api_key=API_KEY,
-        model="gpt-4"  # or "gpt-3.5-turbo" for cheaper option
+        model="gpt-4"
     )
     
-    # Generate metadata
     print("🚀 Starting domain metadata generation...")
     domain_metadata = generator.generate_routing_metadata(file_configs)
     
-    # Save results
     output_file = "domain_metadata.json"
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(domain_metadata, f, indent=2, ensure_ascii=False)
     
     print(f"✅ Domain metadata saved to {output_file}")
     
-    # Display summary
     print("\n📊 Generated Metadata Summary:")
     for domain, metadata in domain_metadata.items():
         print(f"\n🏷️  Domain: {domain}")
@@ -525,7 +492,6 @@ def main():
         print(f"   Example Queries: {len(metadata.get('example_queries', []))} queries")
         print(f"   Main Topics: {', '.join(metadata.get('main_topics', []))}")
 
-# Example for testing individual file types
 def test_file_type_handling():
     """Test the file type handling separately"""
     API_KEY = os.getenv("OPENAI_API_KEY")
@@ -536,14 +502,12 @@ def test_file_type_handling():
     
     generator = DomainMetadataGenerator(api_key=API_KEY)
     
-    # Test JSON file
     json_file = os.getenv("COMBINED_DYNAMIC_PATH", "")
     if os.path.exists(json_file):
         print("Testing JSON file handling...")
         json_samples = generator.smart_file_sampling(json_file)
         print(f"JSON samples extracted: {sum(len(samples) for samples in json_samples.values())}")
     
-    # Test text file  
     txt_file = os.getenv("COMBINED_STATIC_PATH", "")
     if os.path.exists(txt_file):
         print("Testing text file handling...")
@@ -552,5 +516,3 @@ def test_file_type_handling():
 
 if __name__ == "__main__":
     main()
-    # Uncomment to test file handling separately:
-    # test_file_type_handling()

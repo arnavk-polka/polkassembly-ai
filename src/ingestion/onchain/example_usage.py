@@ -9,14 +9,12 @@ import sys
 from pathlib import Path
 import logging
 
-# Add project paths
-project_root = Path(__file__).parent.parent.parent  # Gets us to polkassembly-ai/
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from insert_onchain_to_postgres import OnchainDataPipeline
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -24,10 +22,8 @@ def example_full_pipeline():
     """Example: Run the complete pipeline"""
     logger.info("Example 1: Running complete pipeline")
     
-    # Initialize pipeline with default data directory
     pipeline = OnchainDataPipeline()
     
-    # Run all steps
     success = pipeline.run_full_pipeline()
     
     if success:
@@ -41,13 +37,10 @@ def example_custom_data_directory():
     """Example: Run pipeline with custom data directory"""
     logger.info("Example 2: Running pipeline with custom data directory")
     
-    # Use a custom data directory
     custom_data_dir = "/tmp/polkassembly_updates"
     
-    # Initialize pipeline with custom directory
     pipeline = OnchainDataPipeline(updates_data_dir=custom_data_dir)
     
-    # Run all steps
     success = pipeline.run_full_pipeline()
     
     if success:
@@ -61,10 +54,8 @@ def example_individual_steps():
     """Example: Run individual pipeline steps"""
     logger.info("Example 3: Running individual pipeline steps")
     
-    # Initialize pipeline
     pipeline = OnchainDataPipeline()
     
-    # Run steps individually for more control
     steps = [
         ("Download onchain data", pipeline.step1_download_onchain_data),
         ("Flatten JSON to CSV", pipeline.step2_flatten_json_to_csv),
@@ -83,8 +74,6 @@ def example_individual_steps():
         
         logger.info(f"✅ Step completed: {step_name}")
         
-        # You could add custom logic here between steps
-        # For example: validation, cleanup, notifications, etc.
     
     logger.info("✅ All individual steps completed!")
     return True
@@ -94,27 +83,21 @@ def example_with_error_handling():
     logger.info("Example 4: Pipeline with error handling")
     
     try:
-        # Initialize pipeline
         pipeline = OnchainDataPipeline()
         
-        # Check prerequisites
         if not pipeline.updates_data_dir.exists():
             logger.error("Data directory doesn't exist!")
             return False
         
-        # Run pipeline with error handling
         success = pipeline.run_full_pipeline()
         
         if success:
-            # Check results
             new_records_files = list(pipeline.new_records_dir.glob("new_records_*.csv"))
             
             if new_records_files:
                 latest_file = max(new_records_files, key=lambda f: f.stat().st_mtime)
                 logger.info(f"📄 Latest new records file: {latest_file.name}")
                 
-                # You could process the new records here
-                # For example: send notifications, trigger other processes, etc.
             else:
                 logger.info("ℹ️  No new records found")
             
@@ -131,16 +114,13 @@ def example_cleanup():
     """Example: Cleanup intermediate files after pipeline"""
     logger.info("Example 5: Pipeline with cleanup")
     
-    # Initialize pipeline
     pipeline = OnchainDataPipeline()
     
-    # Run pipeline
     success = pipeline.run_full_pipeline()
     
     if success:
         logger.info("✅ Pipeline completed!")
         
-        # Cleanup intermediate files to save space
         logger.info("🧹 Cleaning up intermediate files...")
         pipeline.cleanup_intermediate_files(keep_final_results=True)
         
@@ -162,7 +142,6 @@ def main():
     if len(sys.argv) > 1:
         example_num = sys.argv[1]
     else:
-        # Show menu
         logger.info("🔄 Onchain Data Pipeline Examples")
         logger.info("=" * 40)
         for num, (name, _) in examples.items():

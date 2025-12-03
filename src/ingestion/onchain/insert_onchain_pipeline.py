@@ -26,15 +26,10 @@ import subprocess
 import json
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Imports use src.* paths, no sys.path manipulation needed
 
-# Note: We'll run the existing scripts via subprocess rather than importing
-# to avoid potential import issues and maintain isolation
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -44,21 +39,18 @@ class OnchainDataPipeline:
         self.updates_dir = Path(__file__).parent
         self.updates_data_dir = Path(updates_data_dir) if updates_data_dir else self.updates_dir / "data"
         
-        # Create directory structure
         self.raw_data_dir = self.updates_data_dir / "raw_json"
         self.csv_data_dir = self.updates_data_dir / "all_csv"
         self.combined_data_dir = self.updates_data_dir / "one_table"
         self.filtered_data_dir = self.updates_data_dir / "filtered"
         self.new_records_dir = self.updates_data_dir / "new_records"
         
-        # Create all directories
         for directory in [self.raw_data_dir, self.csv_data_dir, self.combined_data_dir, 
                          self.filtered_data_dir, self.new_records_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Pipeline initialized with data directory: {self.updates_data_dir}")
         
-        # Define the 86 filtered columns
         self.filtered_columns = [
             'source_file', 'source_network', 'source_proposal_type',
             'source_row_id', 'allowedcommentor', 'content', 'createdat',
@@ -106,7 +98,6 @@ class OnchainDataPipeline:
         logger.info("=" * 60)
         
         try:
-            # Create a custom script that calls onchain_data.py with our data directory
             data_dir = project_root / "src" / "data"
             onchain_script = data_dir / "onchain_data.py"
             
@@ -116,44 +107,36 @@ class OnchainDataPipeline:
             
             logger.info(f"Running onchain_data.py with custom data directory: {self.raw_data_dir}")
             
-            # Create a custom script that imports and runs onchain_data with our directory
             custom_script_content = f'''
 import sys
 sys.path.insert(0, "{project_root / "src"}")
 
 from src.ingestion.onchain.onchain_data import fetch_onchain_data
 
-# Run with our custom data directory
 print("Starting onchain data fetch...")
 fetch_onchain_data(max_items_per_type=1000, data_dir="{self.raw_data_dir}")
 print("Onchain data fetch completed!")
 '''
             
-            # Write and run custom script
             custom_script_path = self.updates_data_dir / "temp_onchain.py"
             with open(custom_script_path, 'w') as f:
                 f.write(custom_script_content)
             
-            # Run the custom script with real-time output streaming
             logger.info("Starting onchain_data.py execution...")
             process = subprocess.Popen([
                 sys.executable, str(custom_script_path)
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
                text=True, bufsize=1, universal_newlines=True)
             
-            # Stream output in real-time
             while True:
                 output = process.stdout.readline()
                 if output == '' and process.poll() is not None:
                     break
                 if output:
-                    # Print the output from the script with a prefix
                     logger.info(f"[onchain_data.py] {output.strip()}")
             
-            # Wait for process to complete
             return_code = process.poll()
             
-            # Clean up temporary script
             custom_script_path.unlink()
             
             if return_code != 0:
@@ -162,7 +145,6 @@ print("Onchain data fetch completed!")
             
             logger.info("onchain_data.py completed successfully")
             
-            # Verify data was downloaded
             json_files = list(self.raw_data_dir.glob("*.json"))
             logger.info(f"Downloaded {len(json_files)} JSON files")
             
@@ -170,7 +152,6 @@ print("Onchain data fetch completed!")
                 logger.error("No JSON files were downloaded!")
                 return False
             
-            # Log file sizes
             total_size = sum(f.stat().st_size for f in json_files) / (1024 * 1024)
             logger.info(f"Total data size: {total_size:.2f} MB")
             
@@ -187,7 +168,6 @@ print("Onchain data fetch completed!")
         logger.info("=" * 60)
         
         try:
-            # Change to the texttosql directory and run flatten_all_data.py
             texttosql_dir = project_root / "src" / "texttosql"
             flatten_script = texttosql_dir / "flatten_all_data.py"
             
@@ -197,51 +177,41 @@ print("Onchain data fetch completed!")
             
             logger.info(f"Running flatten_all_data.py from {texttosql_dir}")
             
-            # Modify the script temporarily to use our directories
-            # We'll create a custom version that uses our paths
             custom_script_content = f'''
 import sys
 sys.path.insert(0, "{project_root / "src"}")
 
 from src.ingestion.onchain.flatten_all_data import DataFlattener
 
-# Initialize with our custom paths
 flattener = DataFlattener(
     data_dir="{self.raw_data_dir}",
     output_data_dir="{self.updates_data_dir}"
 )
 
-# Process all files
 print("Starting JSON flattening process...")
 flattener.process_all_files()
 print("JSON flattening completed!")
 '''
             
-            # Write and run custom script
             custom_script_path = self.updates_data_dir / "temp_flatten.py"
             with open(custom_script_path, 'w') as f:
                 f.write(custom_script_content)
             
-            # Run the custom script with real-time output streaming
             logger.info("Starting flatten_all_data.py execution...")
             process = subprocess.Popen([
                 sys.executable, str(custom_script_path)
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
                text=True, bufsize=1, universal_newlines=True)
             
-            # Stream output in real-time
             while True:
                 output = process.stdout.readline()
                 if output == '' and process.poll() is not None:
                     break
                 if output:
-                    # Print the output from the script with a prefix
                     logger.info(f"[flatten_all_data.py] {output.strip()}")
             
-            # Wait for process to complete
             return_code = process.poll()
             
-            # Clean up temporary script
             custom_script_path.unlink()
             
             if return_code != 0:
@@ -250,7 +220,6 @@ print("JSON flattening completed!")
             
             logger.info("flatten_all_data.py completed successfully")
             
-            # Verify CSV files were created
             csv_files = list(self.csv_data_dir.glob("*.csv"))
             logger.info(f"Created {len(csv_files)} CSV files")
             
@@ -258,8 +227,7 @@ print("JSON flattening completed!")
                 logger.error("No CSV files were created!")
                 return False
             
-            # Log CSV file info
-            for csv_file in csv_files[:5]:  # Show first 5 files
+            for csv_file in csv_files[:5]:
                 df = pd.read_csv(csv_file)
                 logger.info(f"  {csv_file.name}: {len(df)} rows, {len(df.columns)} columns")
             
@@ -279,51 +247,42 @@ print("JSON flattening completed!")
         logger.info("=" * 60)
         
         try:
-            # Create a custom script to run create_one_table.py with our paths
             custom_script_content = f'''
 import sys
 sys.path.insert(0, "{project_root / "src"}")
 
 from src.ingestion.onchain.create_one_table import CSVCombiner
 
-# Initialize with our custom paths
 combiner = CSVCombiner(
     csv_directory="{self.csv_data_dir}",
     output_directory="{self.combined_data_dir}"
 )
 
-# Combine all CSV files
 print("Starting CSV combination process...")
 result = combiner.run_combination()
 combined_file = result['combined_csv']
 print(f"Combined file created: {{combined_file}}")
 '''
             
-            # Write and run custom script
             custom_script_path = self.updates_data_dir / "temp_combine.py"
             with open(custom_script_path, 'w') as f:
                 f.write(custom_script_content)
             
-            # Run the custom script with real-time output streaming
             logger.info("Starting create_one_table.py execution...")
             process = subprocess.Popen([
                 sys.executable, str(custom_script_path)
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
                text=True, bufsize=1, universal_newlines=True)
             
-            # Stream output in real-time
             while True:
                 output = process.stdout.readline()
                 if output == '' and process.poll() is not None:
                     break
                 if output:
-                    # Print the output from the script with a prefix
                     logger.info(f"[create_one_table.py] {output.strip()}")
             
-            # Wait for process to complete
             return_code = process.poll()
             
-            # Clean up temporary script
             custom_script_path.unlink()
             
             if return_code != 0:
@@ -332,22 +291,19 @@ print(f"Combined file created: {{combined_file}}")
             
             logger.info("create_one_table.py completed successfully")
             
-            # Find the combined file
             combined_files = list(self.combined_data_dir.glob("combined_*.csv"))
             if not combined_files:
                 logger.error("Combined CSV file was not created!")
                 return False
             
-            combined_file = combined_files[0]  # Take the first (should be only one)
+            combined_file = combined_files[0]
             
-            # Load and analyze combined file
             df_combined = pd.read_csv(combined_file)
             logger.info(f"Combined file created: {combined_file.name}")
             logger.info(f"  Rows: {len(df_combined):,}")
             logger.info(f"  Columns: {len(df_combined.columns)} (expected ~486)")
             logger.info(f"  File size: {combined_file.stat().st_size / (1024*1024):.2f} MB")
             
-            # Store the combined file path for next step
             self.combined_file_path = combined_file
             
             return True
@@ -363,9 +319,7 @@ print(f"Combined file created: {{combined_file}}")
         logger.info("=" * 60)
         
         try:
-            # Load the combined CSV file
             if not hasattr(self, 'combined_file_path'):
-                # Try to find the combined file
                 combined_files = list(self.combined_data_dir.glob("combined_*.csv"))
                 if not combined_files:
                     logger.error("No combined CSV file found!")
@@ -377,7 +331,6 @@ print(f"Combined file created: {{combined_file}}")
             
             logger.info(f"Original data: {len(df_combined)} rows, {len(df_combined.columns)} columns")
             
-            # Check which columns are available
             available_columns = set(df_combined.columns)
             requested_columns = set(self.filtered_columns)
             
@@ -387,14 +340,11 @@ print(f"Combined file created: {{combined_file}}")
             if missing_columns:
                 logger.warning(f"Missing columns ({len(missing_columns)}): {list(missing_columns)[:10]}...")
             
-            # Filter to available columns only
             columns_to_use = [col for col in self.filtered_columns if col in available_columns]
             logger.info(f"Using {len(columns_to_use)} out of {len(self.filtered_columns)} requested columns")
             
-            # Create filtered dataframe
             df_filtered = df_combined[columns_to_use]
             
-            # Save filtered data
             filtered_file_path = self.filtered_data_dir / "governance_data_86.csv"
             df_filtered.to_csv(filtered_file_path, index=False)
             
@@ -403,7 +353,6 @@ print(f"Combined file created: {{combined_file}}")
             logger.info(f"  Columns: {len(df_filtered.columns)}")
             logger.info(f"  File size: {filtered_file_path.stat().st_size / (1024*1024):.2f} MB")
             
-            # Store the filtered file path for next step
             self.filtered_file_path = filtered_file_path
             
             return True
@@ -419,7 +368,6 @@ print(f"Combined file created: {{combined_file}}")
         logger.info("=" * 60)
         
         try:
-            # Load the filtered CSV file
             if not hasattr(self, 'filtered_file_path'):
                 filtered_files = list(self.filtered_data_dir.glob("governance_data_86.csv"))
                 if not filtered_files:
@@ -430,16 +378,13 @@ print(f"Combined file created: {{combined_file}}")
             logger.info(f"Loading filtered data: {self.filtered_file_path.name}")
             df_new = pd.read_csv(self.filtered_file_path)
             
-            # Check if row_index column exists
             if 'row_index' not in df_new.columns:
                 logger.error("row_index column not found in filtered data!")
                 return False
             
-            # Extract all row_index values from CSV
             csv_row_indexes = set(df_new['row_index'].dropna().astype(str))
             logger.info(f"Found {len(csv_row_indexes)} row_index values in CSV")
             
-            # Connect to PostgreSQL and get existing row_index values
             try:
                 db_config = {
                     'host': os.getenv('POSTGRES_HOST'),
@@ -449,7 +394,6 @@ print(f"Combined file created: {{combined_file}}")
                     'password': os.getenv('POSTGRES_PASSWORD')
                 }
                 
-                # Validate required environment variables
                 required_vars = ['POSTGRES_HOST', 'POSTGRES_DATABASE', 'POSTGRES_USER', 'POSTGRES_PASSWORD']
                 missing_vars = [var for var in required_vars if not os.getenv(var)]
                 
@@ -461,7 +405,6 @@ print(f"Combined file created: {{combined_file}}")
                 conn = psycopg2.connect(**db_config)
                 cursor = conn.cursor()
                 
-                # Check if governance_data table exists
                 cursor.execute("""
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
@@ -475,7 +418,6 @@ print(f"Combined file created: {{combined_file}}")
                     logger.info("All records will be considered new")
                     db_row_indexes = set()
                 else:
-                    # Get all row_index values from PostgreSQL
                     logger.info("Querying existing row_index values from governance_data table...")
                     cursor.execute("SELECT row_index FROM governance_data WHERE row_index IS NOT NULL")
                     db_results = cursor.fetchall()
@@ -490,7 +432,6 @@ print(f"Combined file created: {{combined_file}}")
                 logger.info("Assuming no existing records in database")
                 db_row_indexes = set()
             
-            # Find new row_index values (in CSV but not in database)
             new_row_indexes = csv_row_indexes - db_row_indexes
             logger.info(f"Found {len(new_row_indexes)} new records to insert")
             
@@ -498,10 +439,8 @@ print(f"Combined file created: {{combined_file}}")
                 logger.info("No new records found. Database is up to date.")
                 return True
             
-            # Filter the dataframe to only include new records
             df_new_records = df_new[df_new['row_index'].astype(str).isin(new_row_indexes)]
             
-            # Save new records to CSV
             new_records_file = self.new_records_dir / f"new_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             df_new_records.to_csv(new_records_file, index=False)
             
@@ -510,14 +449,12 @@ print(f"Combined file created: {{combined_file}}")
             logger.info(f"  Columns: {len(df_new_records.columns)}")
             logger.info(f"  File size: {new_records_file.stat().st_size / (1024*1024):.2f} MB")
             
-            # Also save a summary of new records with their createdat
             if 'createdat' in df_new_records.columns:
                 summary_data = df_new_records[['row_index', 'createdat']].copy()
                 summary_file = self.new_records_dir / f"new_records_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 summary_data.to_csv(summary_file, index=False)
                 logger.info(f"Summary file saved: {summary_file.name}")
             
-            # Store the new records file path
             self.new_records_file_path = new_records_file
             
             return True
@@ -534,27 +471,22 @@ print(f"Combined file created: {{combined_file}}")
         
         start_time = datetime.now()
         
-        # Step 1: Download onchain data
         if not self.step1_download_onchain_data():
             logger.error("❌ Pipeline failed at step 1")
             return False
         
-        # Step 2: Flatten JSON to CSV
         if not self.step2_flatten_json_to_csv():
             logger.error("❌ Pipeline failed at step 2")
             return False
         
-        # Step 3: Combine CSV files
         if not self.step3_combine_csv_files():
             logger.error("❌ Pipeline failed at step 3")
             return False
         
-        # Step 4: Filter to 86 columns
         if not self.step4_filter_to_86_columns():
             logger.error("❌ Pipeline failed at step 4")
             return False
         
-        # Step 5: Identify new records
         if not self.step5_identify_new_records():
             logger.error("❌ Pipeline failed at step 5")
             return False
@@ -568,7 +500,6 @@ print(f"Combined file created: {{combined_file}}")
         logger.info(f"⏱️  Total duration: {duration}")
         logger.info(f"📁 All data saved in: {self.updates_data_dir}")
         
-        # Show final summary
         if hasattr(self, 'new_records_file_path'):
             logger.info(f"📄 New records file: {self.new_records_file_path.name}")
         
@@ -581,25 +512,18 @@ print(f"Combined file created: {{combined_file}}")
         if not keep_final_results:
             logger.warning("This will delete ALL processed data!")
         
-        # Optionally remove raw JSON files (largest)
         json_files = list(self.raw_data_dir.glob("*.json"))
         if json_files:
             total_size = sum(f.stat().st_size for f in json_files) / (1024 * 1024)
             logger.info(f"Raw JSON files: {len(json_files)} files, {total_size:.2f} MB")
             
-            # Uncomment to actually delete
-            # for f in json_files:
-            #     f.unlink()
-            # logger.info("Raw JSON files deleted")
 
 def main():
     """Main execution function"""
     logger.info("🔄 Onchain Data Pipeline - Insert to PostgreSQL")
     
-    # Initialize pipeline
     pipeline = OnchainDataPipeline()
     
-    # Run the complete pipeline
     success = pipeline.run_full_pipeline()
     
     if success:

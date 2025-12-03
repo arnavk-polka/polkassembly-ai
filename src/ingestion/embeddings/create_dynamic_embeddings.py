@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 import json
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 from src.core.embeddings import EmbeddingManager
 from src.core.text_chunker import TextChunker
 from src.ingestion.data_loader import DataLoader
@@ -29,10 +27,8 @@ def load_dynamic_data(data_dir: str) -> List[Dict[str, Any]]:
         logger.warning(f"Data directory not found: {data_path}")
         return documents
         
-    # Process all JSON files in the directory
     for file_path in data_path.glob("*.json"):
         try:
-            # Extract network from filename (polkadot_* or kusama_*)
             filename = file_path.name.lower()
             if filename.startswith("polkadot_"):
                 network = "polkadot"
@@ -45,13 +41,10 @@ def load_dynamic_data(data_dir: str) -> List[Dict[str, Any]]:
             if file_path.name == "fetch_summary.json":
                 continue
                 
-            # Load JSON data
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Process each item in the file
             for item in data.get('items', []):
-                # Extract content parts
                 content_parts = []
                 
                 if item.get('title'):
@@ -72,7 +65,6 @@ def load_dynamic_data(data_dir: str) -> List[Dict[str, Any]]:
                 
                 content = '\n\n'.join(content_parts)
                 
-                # Create metadata
                 metadata = {
                     'title': item.get('title', ''),
                     'network': network,
@@ -80,7 +72,7 @@ def load_dynamic_data(data_dir: str) -> List[Dict[str, Any]]:
                     'index': item.get('index', ''),
                     'createdAt': item.get('createdAt', ''),
                     'source': 'polkassembly',
-                    'data_type': 'dynamic',  # Add this to distinguish dynamic data
+                    'data_type': 'dynamic',
                     'file_path': str(file_path)
                 }
                 
@@ -111,11 +103,9 @@ def create_dynamic_embeddings(
         collection_name: Name for the Chroma collection
     """
     try:
-        # Set default data directory if not provided
         if not data_dir:
             data_dir = os.path.join(project_root, Config.DYNAMIC_DATA_PATH)
         
-        # Use config values if not provided
         chunk_size = chunk_size or Config.CHUNK_SIZE
         chunk_overlap = chunk_overlap or Config.CHUNK_OVERLAP
         collection_name = collection_name or Config.CHROMA_DYNAMIC_COLLECTION_NAME
@@ -123,7 +113,6 @@ def create_dynamic_embeddings(
         logger.info(f"Creating embeddings for dynamic data in {data_dir}")
         logger.info(f"Using collection name: {collection_name}")
         
-        # Initialize components
         chunker = TextChunker(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
@@ -132,14 +121,12 @@ def create_dynamic_embeddings(
         embedding_manager = EmbeddingManager(
             openai_api_key=Config.OPENAI_API_KEY,
             collection_name=collection_name,
-            chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY  # Remove "_dynamic" suffix
+            chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY
         )
         
-        # Clear existing collection to start fresh
         logger.info("Clearing existing collection...")
         embedding_manager.clear_collection()
         
-        # Load documents
         documents = load_dynamic_data(data_dir)
         if not documents:
             logger.warning("No dynamic data found")
@@ -147,7 +134,6 @@ def create_dynamic_embeddings(
         
         logger.info(f"Loaded {len(documents)} documents")
         
-        # Process documents into chunks
         all_chunks = []
         for doc in documents:
             chunks = chunker.chunk_document(doc)
@@ -155,7 +141,6 @@ def create_dynamic_embeddings(
         
         logger.info(f"Created {len(all_chunks)} chunks")
         
-        # Create embeddings
         embedding_manager.add_chunks_to_collection(all_chunks)
         logger.info("Successfully created embeddings for dynamic data")
         

@@ -1,5 +1,7 @@
 """SQL generation prompt template using structured intent for governance data queries"""
 
+PROMPT = """You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."""
+
 PROMPT_TEMPLATE = """You are a PostgreSQL expert. Convert natural language queries into optimized SQL queries using the structured intent provided.
 
 STRUCTURED INTENT (use this as primary input):
@@ -204,4 +206,3 @@ DATABASE SCHEMA:
             
             SQL Query:
             """
-

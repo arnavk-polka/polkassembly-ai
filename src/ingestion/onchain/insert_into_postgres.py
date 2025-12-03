@@ -17,10 +17,8 @@ import json
 from datetime import datetime
 import numpy as np
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,6 @@ class PostgresInserter:
             'password': os.getenv('POSTGRES_PASSWORD')
         }
         
-        # Validate required environment variables
         required_vars = ['POSTGRES_HOST', 'POSTGRES_DATABASE', 'POSTGRES_USER', 'POSTGRES_PASSWORD']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
@@ -45,7 +42,6 @@ class PostgresInserter:
         self.table_name = table_name or os.getenv('POSTGRES_TABLE_NAME', 'governance_data')
         self.batch_size = int(os.getenv('POSTGRES_BATCH_SIZE', '1000'))
         
-        # Load schema information
         self.schema_path = schema_path
         self.schema_info = self._load_schema_info()
         
@@ -58,7 +54,6 @@ class PostgresInserter:
         if self.schema_path:
             schema_path = Path(self.schema_path)
         else:
-            # Default path for backward compatibility
             schema_path = Path(__file__).parent.parent / "data" / "one_table" / "schema_info.json"
         
         if not schema_path.exists():
@@ -113,22 +108,17 @@ class PostgresInserter:
         """Analyze CSV structure to determine table schema"""
         logger.info(f"Analyzing CSV structure: {csv_path.name}")
         
-        # Read a sample to understand structure
         sample_df = pd.read_csv(csv_path, nrows=1000)
         
-        # Get full column info
-        df_info = pd.read_csv(csv_path, nrows=0)  # Just headers
+        df_info = pd.read_csv(csv_path, nrows=0)
         columns = list(df_info.columns)
         
-        # Analyze data types
         column_info = {}
         for col in columns:
             col_data = sample_df[col]
             
-            # Determine PostgreSQL data type
             pg_type = self._infer_postgres_type(col, col_data)
             
-            # Check for constraints
             has_nulls = col_data.isnull().any()
             is_unique = len(col_data) == col_data.nunique() if not has_nulls else False
             
@@ -139,7 +129,6 @@ class PostgresInserter:
                 'pandas_dtype': str(col_data.dtype)
             }
         
-        # Get total row count
         total_rows = len(pd.read_csv(csv_path))
         
         analysis = {
@@ -155,17 +144,14 @@ class PostgresInserter:
     def _infer_postgres_type(self, column_name: str, series: pd.Series) -> str:
         """Infer PostgreSQL data type from schema info or pandas Series"""
         
-        # First, check if we have schema information for this column
         if self.schema_info and column_name in self.schema_info:
             schema_type = self.schema_info[column_name].get('data_type', '').lower()
             
-            # Map schema types to PostgreSQL types
             if schema_type in ['date', 'Date']:
                 return 'DATE'
             elif schema_type in ['datetime', 'timestamp']:
                 return 'TIMESTAMP'
             elif schema_type in ['int64', 'integer', 'int']:
-                # Use NUMERIC for all integer types to avoid BIGINT range issues
                 logger.info(f"Column {column_name} (schema: {schema_type}) using NUMERIC for safety")
                 return 'NUMERIC'
             elif schema_type in ['float64', 'float', 'double']:
@@ -173,17 +159,13 @@ class PostgresInserter:
             elif schema_type in ['bool', 'boolean']:
                 return 'BOOLEAN'
             elif schema_type in ['string', 'str', 'text']:
-                # Use TEXT for all string types to avoid length issues
                 return 'TEXT'
             elif schema_type == 'object':
                 return 'TEXT'
         
-        # Fallback to automatic inference if no schema info
         col_lower = column_name.lower()
         
-        # Check pandas dtype
         if pd.api.types.is_integer_dtype(series):
-            # Use NUMERIC for all integer types to avoid any range issues
             logger.info(f"Column {column_name} detected as integer, using NUMERIC for safety")
             return 'NUMERIC'
         
@@ -196,56 +178,44 @@ class PostgresInserter:
         elif pd.api.types.is_datetime64_any_dtype(series):
             return 'TIMESTAMP'
         
-        # For object types, analyze content
         elif series.dtype == 'object':
             non_null_data = series.dropna()
             
             if len(non_null_data) == 0:
                 return 'TEXT'
             
-            # Check if it's date strings
             if any(pattern in col_lower for pattern in ['date', 'time', 'created', 'updated']):
                 return 'DATE'
             
-            # Use TEXT for all object types to avoid length issues
             return 'TEXT'
         
-        return 'TEXT'  # Default fallback
+        return 'TEXT'
     
     def create_table(self, analysis: Dict[str, Any], drop_if_exists: bool = False) -> bool:
         """Create table based on CSV analysis"""
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Drop table if requested
                     if drop_if_exists:
                         logger.info(f"Dropping table {self.table_name} if exists...")
                         cur.execute(f"DROP TABLE IF EXISTS {self.table_name};")
                     
-                    # Build CREATE TABLE statement
                     columns_sql = []
                     for col in analysis['columns']:
                         col_info = analysis['column_info'][col]
                         pg_type = col_info['postgres_type']
                         
-                        # Clean column name for PostgreSQL
                         clean_col = self._clean_column_name(col)
                         
-                        # Add NOT NULL for source tracking columns only
                         not_null = ""
                         if col.startswith('source_'):
                             not_null = " NOT NULL"
                         
                         columns_sql.append(f'    "{clean_col}" {pg_type}{not_null}')
                     
-                    # Add auto-incrementing primary key
                     columns_sql.insert(0, '    "row_id" SERIAL PRIMARY KEY')
                     
-                    # Alternative: Use composite key if no auto-increment desired
-                    # if 'source_file' in analysis['columns'] and 'source_row_id' in analysis['columns']:
-                    #     columns_sql.append('    PRIMARY KEY ("source_file", "source_row_id")')
                     
-                    # Build CREATE TABLE statement without f-string backslash issues
                     columns_part = ',\n'.join(columns_sql)
                     create_sql = f"""
 CREATE TABLE {self.table_name} (
@@ -258,7 +228,6 @@ CREATE TABLE {self.table_name} (
                     
                     cur.execute(create_sql)
                     
-                    # Create indexes for common query patterns
                     self._create_indexes(cur, analysis)
                     
                     conn.commit()
@@ -271,14 +240,10 @@ CREATE TABLE {self.table_name} (
     
     def _clean_column_name(self, column: str) -> str:
         """Clean column name for PostgreSQL compatibility"""
-        # Replace problematic characters
         clean = column.replace(' ', '_').replace('-', '_').replace('.', '_')
-        # Remove multiple underscores
         while '__' in clean:
             clean = clean.replace('__', '_')
-        # Remove leading/trailing underscores
         clean = clean.strip('_')
-        # Ensure it starts with a letter
         if clean and clean[0].isdigit():
             clean = f'col_{clean}'
         return clean.lower()
@@ -287,7 +252,6 @@ CREATE TABLE {self.table_name} (
         """Create indexes for common query patterns"""
         logger.info("Creating indexes...")
         
-        # Common columns to index
         index_candidates = [
             'source_network', 'source_proposal_type', 'status', 'created_at',
             'updated_at', 'id', 'proposal_hash', 'network', 'row_index'
@@ -303,7 +267,6 @@ CREATE TABLE {self.table_name} (
                 except Exception as e:
                     logger.warning(f"Failed to create index {index_name}: {e}")
         
-        # Composite indexes
         composite_indexes = [
             ('source_network', 'source_proposal_type'),
             ('source_network', 'status'),
@@ -328,23 +291,18 @@ CREATE TABLE {self.table_name} (
             
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Clean column names for SQL
                     clean_columns = [self._clean_column_name(col) for col in analysis['columns']]
                     columns_sql = ', '.join([f'"{col}"' for col in clean_columns])
                     
-                    # Prepare INSERT statement
                     placeholders = ', '.join(['%s'] * len(clean_columns))
                     insert_sql = f"INSERT INTO {self.table_name} ({columns_sql}) VALUES ({placeholders})"
                     
-                    # Process CSV in chunks
                     total_inserted = 0
                     chunk_size = self.batch_size
                     
                     for chunk_df in pd.read_csv(csv_path, chunksize=chunk_size):
-                        # Clean and prepare data
                         chunk_data = self._prepare_data_for_insert(chunk_df, analysis)
                         
-                        # Insert batch
                         execute_values(
                             cur,
                             f"INSERT INTO {self.table_name} ({columns_sql}) VALUES %s",
@@ -355,16 +313,13 @@ CREATE TABLE {self.table_name} (
                         
                         total_inserted += len(chunk_data)
                         
-                        # Commit periodically
                         if total_inserted % (chunk_size * 5) == 0:
                             conn.commit()
                             logger.info(f"Inserted {total_inserted:,} / {analysis['total_rows']:,} rows ({total_inserted/analysis['total_rows']*100:.1f}%)")
                     
-                    # Final commit
                     conn.commit()
                     logger.info(f"Successfully inserted all {total_inserted:,} rows")
                     
-                    # Verify insertion
                     cur.execute(f"SELECT COUNT(*) FROM {self.table_name};")
                     db_count = cur.fetchone()[0]
                     logger.info(f"Database verification: {db_count:,} rows in table")
@@ -379,7 +334,6 @@ CREATE TABLE {self.table_name} (
         """Prepare DataFrame data for PostgreSQL insertion with proper type conversion"""
         df_clean = df.copy()
         
-        # Convert each column based on schema information and PostgreSQL type
         for col in analysis['columns']:
             if col not in df_clean.columns:
                 continue
@@ -400,22 +354,17 @@ CREATE TABLE {self.table_name} (
                     df_clean[col] = self._convert_to_float(df_clean[col])
                 elif pg_type == 'BOOLEAN':
                     df_clean[col] = self._convert_to_boolean(df_clean[col])
-                # String types (VARCHAR, TEXT) don't need conversion
                 
             except Exception as e:
                 logger.error(f"Error converting column {col} to {pg_type}: {e}")
-                # Keep original data if conversion fails
                 pass
         
-        # Convert NaN to None for PostgreSQL
         df_clean = df_clean.where(pd.notna(df_clean), None)
         
-        # Also handle string 'NaN' and 'null' values
         for col in df_clean.columns:
             if df_clean[col].dtype == 'object':
                 df_clean[col] = df_clean[col].replace(['NaN', 'nan', 'null', 'NULL', ''], None)
         
-        # Convert to list of tuples
         return [tuple(row) for row in df_clean.values]
     
     def _convert_to_date(self, series: pd.Series) -> pd.Series:
@@ -424,9 +373,7 @@ CREATE TABLE {self.table_name} (
             if pd.isna(value) or value is None or value == '':
                 return None
             
-            # Handle various date formats
             try:
-                # Try pandas to_datetime first
                 parsed = pd.to_datetime(value, errors='coerce')
                 if pd.isna(parsed):
                     return None
@@ -443,7 +390,6 @@ CREATE TABLE {self.table_name} (
                 return None
             
             try:
-                # Try pandas to_datetime first
                 parsed = pd.to_datetime(value, errors='coerce')
                 if pd.isna(parsed):
                     return None
@@ -460,18 +406,15 @@ CREATE TABLE {self.table_name} (
                 return None
             
             try:
-                # Handle string representations
                 if isinstance(value, str):
                     value = value.strip()
                     if value == '':
                         return None
                 
-                # Convert to float first to handle decimal strings, then to int
                 float_val = float(value)
                 if np.isnan(float_val):
                     return None
                 
-                # Check if the value is within reasonable integer range
                 int_val = int(float_val)
                 
                 return int_val
@@ -533,11 +476,9 @@ CREATE TABLE {self.table_name} (
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     stats = {}
-                    # Basic stats
                     cur.execute(f"SELECT COUNT(*) FROM {self.table_name};")
                     stats['total_rows'] = cur.fetchone()[0]
                     
-                    # Network distribution (if column exists)
                     if 'source_network' in analysis['columns']:
                         cur.execute(f"""
                             SELECT source_network, COUNT(*) as count 
@@ -547,7 +488,6 @@ CREATE TABLE {self.table_name} (
                         """)
                         stats['network_distribution'] = dict(cur.fetchall())
                     
-                    # Proposal type distribution (if column exists)
                     if 'source_proposal_type' in analysis['columns']:
                         cur.execute(f"""
                             SELECT source_proposal_type, COUNT(*) as count 
@@ -568,25 +508,20 @@ CREATE TABLE {self.table_name} (
         logger.info("Starting full import process...")
         
         try:
-            # Test connection
             if not self.test_connection():
                 logger.error("Database connection test failed")
                 return False
             
-            # Analyze CSV structure
             analysis = self.analyze_csv_structure(csv_path)
             
-            # Create table
             if not self.create_table(analysis, drop_if_exists=drop_existing):
                 logger.error("Table creation failed")
                 return False
             
-            # Insert data
             if not self.insert_csv_data(csv_path, analysis):
                 logger.error("Data insertion failed")
                 return False
             
-            # Get final stats
             stats = self.get_table_stats(analysis)
             if stats:
                 logger.info("Import completed successfully!")
@@ -605,7 +540,6 @@ CREATE TABLE {self.table_name} (
 
 def main():
     """Main execution function"""
-    # Path to the specific CSV file to insert
     csv_file = Path(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/one_table/filter_data/governance_data_86.csv")    
     
     if not csv_file.exists():
@@ -614,14 +548,11 @@ def main():
         return
     
     try:
-        # Create inserter
         inserter = PostgresInserter()
         
         logger.info("Dropping existing table")
-        # Automatically drop existing table
-        drop_existing = True  # Always drop existing table
+        drop_existing = True
         
-        # Run import
         success = inserter.run_full_import(csv_file, drop_existing=drop_existing)
         
         if success:

@@ -120,7 +120,6 @@ def insert_data_to_database(csv_path: Path):
     logger.info("\n--- Step 5: Inserting data into PostgreSQL database ---")
     try:
         inserter = PostgresInserter()
-        # We drop the existing table to ensure a clean slate for comparison.
         success = inserter.run_full_import(csv_path, drop_existing=True)
         if success:
             logger.info("✅ Data inserted into database successfully.")

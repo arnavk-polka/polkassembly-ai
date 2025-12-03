@@ -18,8 +18,6 @@ from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -81,14 +79,12 @@ def judge_answer_similarity(
     Returns: {'score': 'extremely_similar'|'somewhat_similar'|'not_similar', 'reason': str}
     """
     
-    # Check for obvious failures
     if not actual_answer or len(actual_answer.strip()) < 10:
         return {
             'score': 'not_similar',
             'reason': 'Answer is empty or too short - likely blocked or no data returned'
         }
     
-    # Check for common failure patterns
     failure_indicators = [
         'i found no related data',
         'i could not find',
@@ -110,7 +106,6 @@ def judge_answer_similarity(
             'reason': 'Answer indicates failure (no data, blocked, or refused)'
         }
     
-    # Use LLM to judge semantic similarity (lenient)
     judge_prompt = f"""You are a lenient judge comparing two answers to the same question.
 
 Question: "{question}"
@@ -155,9 +150,7 @@ Respond with ONLY valid JSON:
         
         result_text = response.choices[0].message.content.strip()
         
-        # Try to parse JSON
         try:
-            # Remove markdown code blocks if present
             if result_text.startswith('```'):
                 result_text = result_text.split('```')[1]
                 if result_text.startswith('json'):
@@ -170,7 +163,6 @@ Respond with ONLY valid JSON:
                 'reason': result.get('reason', 'LLM evaluation completed')
             }
         except json.JSONDecodeError:
-            # Fallback: try to extract score from text
             if 'extremely_similar' in result_text.lower():
                 return {'score': 'extremely_similar', 'reason': 'Extracted from LLM response'}
             elif 'not_similar' in result_text.lower():
@@ -200,7 +192,6 @@ def run_tests(csv_path: str, output_path: str = None):
         print(f"\n[{idx}/{len(questions)}] Testing: {q['question'][:60]}...")
         print(f"   Expected route: {q['route_expected']}, Tag: {q['tag']}")
         
-        # Query API
         start_time = time.time()
         api_response = query_klara_api(q['question'])
         elapsed_time = time.time() - start_time
@@ -211,7 +202,6 @@ def run_tests(csv_path: str, output_path: str = None):
         print(f"   Route: {actual_route}, Time: {elapsed_time:.2f}s")
         print(f"   Answer preview: {actual_answer[:100]}...")
         
-        # Judge similarity
         print("   Judging similarity...")
         judgment = judge_answer_similarity(
             question=q['question'],
@@ -223,7 +213,6 @@ def run_tests(csv_path: str, output_path: str = None):
         
         print(f"   Score: {judgment['score']} - {judgment['reason']}")
         
-        # Store result
         result = {
             'id': q['id'],
             'question': q['question'],
@@ -241,10 +230,8 @@ def run_tests(csv_path: str, output_path: str = None):
         
         results.append(result)
         
-        # Be nice to the API
         time.sleep(1)
     
-    # Calculate summary statistics
     scores = [r['judgment']['score'] for r in results]
     extremely_similar = scores.count('extremely_similar')
     somewhat_similar = scores.count('somewhat_similar')
@@ -263,11 +250,9 @@ def run_tests(csv_path: str, output_path: str = None):
         'results': results
     }
     
-    # Save results
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
     
-    # Print summary
     print("\n" + "=" * 60)
     print("📊 Test Results Summary")
     print("=" * 60)
@@ -278,7 +263,6 @@ def run_tests(csv_path: str, output_path: str = None):
     print(f"🎯 Route matches: {route_matches}/{len(questions)} ({route_matches/len(questions)*100:.1f}%)")
     print(f"\n📁 Results saved to: {output_path}")
     
-    # List not_similar cases
     if not_similar > 0:
         print("\n⚠️  Questions flagged as 'not_similar':")
         for r in results:
@@ -306,7 +290,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Check if API is running
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=5)
         if response.status_code != 200:
@@ -320,7 +303,6 @@ def main():
     
     print("✅ API is healthy and ready")
     
-    # Run tests
     run_tests(args.csv, args.output)
 
 if __name__ == "__main__":

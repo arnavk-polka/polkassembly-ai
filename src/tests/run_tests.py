@@ -7,8 +7,6 @@ import os
 import sys
 import argparse
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 def run_api_tests():
     """Run basic API functionality tests"""
     print("🚀 Running API Tests...")
@@ -27,7 +25,6 @@ def run_guardrails_tests():
     import unittest
     import sys
     
-    # Discover and run guardrails tests
     loader = unittest.TestLoader()
     suite = loader.discover('src/tests', pattern='test_enhanced_guardrails.py')
     runner = unittest.TextTestRunner(verbosity=2)
@@ -59,7 +56,6 @@ def main():
     print("🔬 Polkadot AI Chatbot Test Suite")
     print("=" * 50)
     
-    # Determine which tests to run
     run_all = args.all and not any([args.api, args.formatting, args.guardrails, getattr(args, 'rate_limit', False)])
     
     if args.api or run_all:

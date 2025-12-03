@@ -12,8 +12,6 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 API_BASE_URL = "http://localhost:8000"
 
 def make_query_request(user_id: str, request_number: int, question: str = None):
@@ -77,7 +75,7 @@ def test_sequential_requests():
     print("-" * 40)
     
     user_id = "test_user_sequential"
-    max_requests = 16  # Stay under 20 to avoid IP blocking
+    max_requests = 16
     
     results = []
     
@@ -91,7 +89,6 @@ def test_sequential_requests():
         else:
             print(f"  ❌ Failed - {result['error']} - Time: {result['response_time']}s")
         
-        # Small delay to avoid overwhelming the server
         time.sleep(0.5)
     
     return results
@@ -102,7 +99,7 @@ def test_concurrent_requests():
     print("-" * 40)
     
     user_id = "test_user_concurrent"
-    max_requests = 10  # Smaller number for concurrent testing
+    max_requests = 10
     
     questions = [
         "What is Polkadot governance?",
@@ -120,13 +117,11 @@ def test_concurrent_requests():
     results = []
     
     with ThreadPoolExecutor(max_workers=5) as executor:
-        # Submit all requests
         futures = [
             executor.submit(make_query_request, user_id, i+1, questions[i % len(questions)])
             for i in range(max_requests)
         ]
         
-        # Collect results as they complete
         for future in as_completed(futures):
             result = future.result()
             results.append(result)
@@ -136,7 +131,6 @@ def test_concurrent_requests():
             else:
                 print(f"  ❌ Request {result['request_number']} - {result['error']} - Time: {result['response_time']}s")
     
-    # Sort results by request number for better display
     results.sort(key=lambda x: x['request_number'])
     return results
 
@@ -196,7 +190,6 @@ def analyze_results(results, test_name):
     print("-" * 50)
     
     if isinstance(results, dict):
-        # Multiple users
         for user, user_results in results.items():
             successful = [r for r in user_results if r['success']]
             failed = [r for r in user_results if not r['success']]
@@ -209,7 +202,6 @@ def analyze_results(results, test_name):
                 avg_time = sum(r['response_time'] for r in successful) / len(successful)
                 print(f"  ⏱️  Average response time: {avg_time:.2f}s")
     else:
-        # Single test
         successful = [r for r in results if r['success']]
         failed = [r for r in results if not r['success']]
         rate_limited = [r for r in failed if r.get('status_code') == 429]
@@ -232,7 +224,6 @@ def main():
     print("🔐 Rate Limiting Test Suite")
     print("=" * 50)
     
-    # Check if API is running
     if not test_health_check():
         print("❌ API is not ready for testing")
         print("Please start the server with: python run_server.py")
@@ -241,36 +232,30 @@ def main():
     print("✅ API is healthy and ready for testing")
     print("\nNote: Making maximum 16 requests to avoid IP blocking")
     
-    # Test 1: Sequential requests
     try:
         sequential_results = test_sequential_requests()
         analyze_results(sequential_results, "Sequential Requests")
     except Exception as e:
         print(f"❌ Sequential test failed: {e}")
     
-    # Wait between tests
     print("\n⏳ Waiting 5 seconds between tests...")
     time.sleep(5)
     
-    # Test 2: Concurrent requests
     try:
         concurrent_results = test_concurrent_requests()
         analyze_results(concurrent_results, "Concurrent Requests")
     except Exception as e:
         print(f"❌ Concurrent test failed: {e}")
     
-    # Wait between tests
     print("\n⏳ Waiting 3 seconds...")
     time.sleep(3)
     
-    # Test 3: Different users
     try:
         multi_user_results = test_different_users()
         analyze_results(multi_user_results, "Multiple Users")
     except Exception as e:
         print(f"❌ Multi-user test failed: {e}")
     
-    # Check final rate limit status
     print("\n🔍 Final Rate Limit Status:")
     print("-" * 30)
     test_users = ["test_user_sequential", "test_user_concurrent", "alice", "bob", "charlie"]

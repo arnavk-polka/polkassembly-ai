@@ -42,34 +42,3 @@ def estimate_confidence(self, chunks: List[Dict[str, Any]]) -> float:
     confidence = min(avg_similarity + chunk_bonus, 1.0)
     return round(confidence, 2)
 
-def generate_summary(self, chunks: List[Dict[str, Any]]) -> str:
-    try:
-        if not chunks:
-            return "No relevant information found."
-        
-        from .context_processing import create_context_from_chunks
-        context = create_context_from_chunks(chunks, max_context_length=2000)
-        
-        from ...prompts.summary_prompt import PROMPT_TEMPLATE as summary_prompt_template
-        summary_prompt = summary_prompt_template.format(context=context)
-        
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "user", "content": summary_prompt.format(context=context)}
-            ],
-            temperature=0.2,
-            max_tokens=300
-        )
-        
-        summary = response.choices[0].message.content.strip()
-        
-        from .context_processing import clean_example_urls
-        summary = clean_example_urls(summary)
-        
-        return summary
-        
-    except Exception as e:
-        logger.error(f"Error generating summary: {e}")
-        return "Unable to generate summary."
-

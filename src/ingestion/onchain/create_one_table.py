@@ -72,7 +72,6 @@ class CSVCombiner:
                 column_frequency[column] += 1
                 column_to_files[column].append(filename)
         
-        # Categorize columns
         common_columns = {col: freq for col, freq in column_frequency.items() if freq > len(file_info) * 0.5}
         rare_columns = {col: freq for col, freq in column_frequency.items() if freq <= 3}
         unique_columns = {col: freq for col, freq in column_frequency.items() if freq == 1}
@@ -122,7 +121,6 @@ class CSVCombiner:
             try:
                 logger.info(f"Processing {filename} ({info['row_count']} rows)")
                 
-                # Read the CSV file
                 df = pd.read_csv(info['path'])
                 
                 df = self.add_source_tracking_columns(df, filename)

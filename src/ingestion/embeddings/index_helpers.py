@@ -98,7 +98,6 @@ def get_collection_stats() -> Dict[str, any]:
         
         total_docs = collection.count()
         
-        # Get sample to count by doc_type
         sample = collection.get(
             limit=min(1000, total_docs),
             include=["metadatas"]
@@ -145,13 +144,11 @@ def verify_indexing(test_limit: int = 5) -> bool:
         indexer = DynamicEmbeddingsIndexer()
         collection = indexer.get_dynamic_collection()
         
-        # Check if collection has docs
         count = collection.count()
         if count == 0:
             logger.warning("Collection is empty")
             return False
         
-        # Test query
         results = collection.query(
             query_texts=["recent proposals"],
             n_results=min(test_limit, count)

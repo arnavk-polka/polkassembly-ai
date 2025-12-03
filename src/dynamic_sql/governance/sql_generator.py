@@ -4,8 +4,7 @@ from typing import Dict, List, Any, Optional
 
 from ..utils.model_usage import print_model_usage, GeminiClient, GEMINI_MODEL_NAME, GEMINI_MODEL_SQL, GEMINI_SQL_TIMEOUT, GEMINI_TIMEOUT
 from ..utils.token_utils import trim_prompt_to_fit_tokens
-from ...prompts.sql_generation_system_prompt import PROMPT as sql_generation_system_prompt
-from ...prompts.sql_generation_with_intent_prompt import PROMPT_TEMPLATE as sql_generation_with_intent_template
+from ...prompts.sql_generation_with_intent_prompt import PROMPT as sql_generation_system_prompt, PROMPT_TEMPLATE as sql_generation_with_intent_template
 
 logger = logging.getLogger(__name__)
 

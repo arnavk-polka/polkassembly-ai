@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -69,11 +68,9 @@ class PolkassemblyDataFetcher:
         self.headers = {
             'Content-Type': 'application/json',
         }
-        # Use specified data directory or default to the requested path
         if data_dir:
             self.data_dir = data_dir
         else:
-            # Default to the specified onchain_data directory
             script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             self.data_dir = os.path.join(script_dir, "data", "onchain_data")
         
@@ -130,7 +127,7 @@ class PolkassemblyDataFetcher:
                 
             all_posts.extend(posts)
             offset += 1
-            time.sleep(0.1)  # Rate limiting
+            time.sleep(0.1)
             
             logger.info(f"Fetched {len(all_posts)} {proposal_type.value} posts so far...")
 
@@ -140,7 +137,6 @@ class PolkassemblyDataFetcher:
         """Save data to JSON file in the data directory"""
         filepath = os.path.join(self.data_dir, filename)
         
-        # Add metadata
         file_data = {
             'network': self.network,
             'timestamp': datetime.now().isoformat(),
@@ -158,7 +154,6 @@ class PolkassemblyDataFetcher:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for proposal_type in ProposalType:
-            # Skip DISCUSSION - it's handled separately by fetch_off_chain_posts_data()
             if proposal_type == ProposalType.DISCUSSION:
                 logger.info(f"Skipping {proposal_type.value} - handled separately")
                 continue
@@ -166,7 +161,6 @@ class PolkassemblyDataFetcher:
             logger.info(f"proposal_type is {proposal_type}")
             try:
                 if proposal_type == ProposalType.REFERENDUM_V2:
-                    # ReferendumV2 requires origin_type parameter
                     for origin_type in OriginType:
                         try:
                             data = self.fetch_all_posts_for_type(
@@ -182,7 +176,6 @@ class PolkassemblyDataFetcher:
                             logger.error(f"Error processing {proposal_type.value} with {origin_type.value}: {e}")
                             continue
                 else:
-                    # Other proposal types don't require origin_type
                     data = self.fetch_all_posts_for_type(
                         proposal_type=proposal_type,
                         max_items=max_items_per_type
@@ -215,7 +208,6 @@ def _resolve_data_dir(explicit: Optional[str]) -> str:
 
 def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
     """Main function to fetch onchain data for all supported networks"""
-    # Use the specified directory path
     data_dir = _resolve_data_dir(data_dir)
     
     logger.info(f"Storing onchain data in: {data_dir}")
@@ -225,10 +217,8 @@ def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
         try:
             logger.info(f"Starting data fetch for {network.value}...")
             
-            # Initialize fetcher with specified data directory
             fetcher = PolkassemblyDataFetcher(network=network.value, data_dir=data_dir)
             
-            # Fetch and save all data
             fetcher.fetch_and_save_all_data(max_items_per_type=max_items_per_type)
             
             logger.info(f"Completed data fetch for {network.value}")
@@ -239,7 +229,6 @@ def fetch_onchain_data(max_items_per_type: int = 1000, data_dir: str = None):
 
 def fetch_off_chain_posts_data(max_items_per_type: int = 1000, data_dir: str = None):
     """Main function to fetch onchain data for all supported networks"""
-    # Use the specified directory path
     if not data_dir:
         data_dir = str(os.getenv("BASE_PATH")) + "/data/onchain_data"
     
@@ -267,7 +256,6 @@ def fetch_off_chain_posts_data(max_items_per_type: int = 1000, data_dir: str = N
             continue
 
 if __name__ == "__main__":
-    # Fetch data for all networks and proposal types
     print(str(os.getenv("BASE_PATH")) + "/data/onchain_data")
-    fetch_onchain_data(max_items_per_type=10000)  # Adjust as needed
+    fetch_onchain_data(max_items_per_type=10000)
     fetch_off_chain_posts_data(max_items_per_type=10000)

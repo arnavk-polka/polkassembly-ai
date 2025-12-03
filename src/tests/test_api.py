@@ -29,7 +29,7 @@ def test_query_endpoint():
     print("\nTesting query endpoint...")
     
     test_questions = [
-        "Hello",  # Test greeting response with follow-ups
+        "Hello",
         "What is Polkadot?",
         "How does staking work in Polkadot?",
         "What are parachains?",
@@ -56,7 +56,6 @@ def test_query_endpoint():
             print(f"   Sources: {len(data['sources'])}")
             print(f"   Follow-up questions: {len(data.get('follow_up_questions', []))}")
             
-            # Print follow-up questions if available
             follow_ups = data.get('follow_up_questions', [])
             if follow_ups:
                 print("   Follow-up suggestions:")
@@ -65,7 +64,7 @@ def test_query_endpoint():
             else:
                 print("   ⚠️  No follow-up questions returned")
             
-            time.sleep(1)  # Be nice to the API
+            time.sleep(1)
             
         except Exception as e:
             print(f"❌ Query failed: {e}")
@@ -99,7 +98,7 @@ def test_search_endpoint():
             for i, result in enumerate(data['results']):
                 print(f"   Result {i+1}: {result['content'][:80]}... (score: {result['similarity_score']:.3f})")
             
-            time.sleep(1)  # Be nice to the API
+            time.sleep(1)
             
         except Exception as e:
             print(f"❌ Search failed: {e}")
@@ -123,12 +122,10 @@ def main():
     print("🚀 Starting API tests...")
     print(f"Testing API at: {API_BASE_URL}")
     
-    # Test health first
     if not test_health_endpoint():
         print("❌ Health check failed - API may not be running or ready")
         return
     
-    # Test other endpoints
     test_stats_endpoint()
     test_search_endpoint()
     test_query_endpoint()

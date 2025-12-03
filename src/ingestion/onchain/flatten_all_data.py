@@ -17,7 +17,6 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -463,7 +462,6 @@ class DataFlattener:
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Extract metadata
             network = data.get('network', 'unknown')
             timestamp = data.get('timestamp', '')
             total_items = data.get('total_items', 0)
@@ -473,48 +471,24 @@ class DataFlattener:
                 logger.warning(f"No items found in {json_file_path.name}")
                 return False, "No items found"
             
-            # Extract proposal type early
             proposal_type = data.get('items', [{}])[0].get('proposalType', 'Unknown') if items else 'Unknown'
             
-            # Flatten all items
             flat_records = [self.flatten_all(item) for item in items]
             
-            # Create DataFrame
             df = pd.DataFrame(flat_records)
             
-            # Generate CSV filename
             csv_filename = json_file_path.stem + '.csv'
             csv_path = self.csv_dir / csv_filename
             
-            # Save CSV
             df.to_csv(csv_path, index=False)
             logger.info(f"Saved CSV: {csv_filename} with {len(df)} rows and {len(df.columns)} columns")
             
-            # # Analyze CSV data for comprehensive metadata
-            # csv_analysis = self.analyze_csv_for_metadata(df, network, proposal_type)
             
-            # # Extract sample data for metadata
-            # sample_data = self.extract_sample_data(df)
             
-            # # Generate metadata
-            # metadata = self.generate_metadata_with_openai(
-            #     json_file_path.name, sample_data, network, proposal_type, total_items, csv_analysis
-            # )
             
-            # # Add minimal file-specific metadata
-            # metadata.update({
-            #     "csv_file": csv_filename,
-            #     "processing_date": datetime.now().isoformat()
-            # })
             
-            # # Save metadata
-            # metadata_filename = json_file_path.stem + '_metadata.json'
-            # metadata_path = self.metadata_dir / metadata_filename
             
-            # with open(metadata_path, 'w', encoding='utf-8') as f:
-            #     json.dump(metadata, f, indent=2, default=str)
             
-            # logger.info(f"Saved metadata: {metadata_filename}")
             return True, f"Successfully processed {len(df)} rows"
             
         except Exception as e:
@@ -530,7 +504,7 @@ class DataFlattener:
             f for f in self.data_dir.glob("*.json")
             if "_comments_" not in f.name
         ]
-        print(f"DEBUG: Found JSON files: {[f.name for f in json_files[:5]]}")  # Show first 5
+        print(f"DEBUG: Found JSON files: {[f.name for f in json_files[:5]]}")
         logger.info(f"Found {len(json_files)} JSON files to process")
         
         results = {
@@ -558,7 +532,6 @@ class DataFlattener:
                     "error": message
                 })
         
-        # Save summary
         summary_path = Path(__file__).parent.parent / "data" / "processing_summary.json"
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, default=str)
@@ -568,27 +541,21 @@ class DataFlattener:
 
 def main():
     """Main execution function"""
-    # Configuration - JSON files are in the data/onchain_data directory
     data_directory = Path(str(os.getenv("BASE_PATH")) + "/data/onchain_data")
-    openai_api_key = os.getenv('OPENAI_API_KEY')  # Set this in your environment
+    openai_api_key = os.getenv('OPENAI_API_KEY')
     
     if not openai_api_key:
         logger.warning("OPENAI_API_KEY not set. Using basic metadata generation.")
     
-    # Debug: Print path information
     print(f"Data directory: {data_directory}")
     print(f"Data directory exists: {data_directory.exists()}")
     print(f"Data directory absolute: {data_directory.resolve()}")
     
-    # Set output directory for CSV files
     output_directory = str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull"
-    # Initialize flattener
     flattener = DataFlattener(str(data_directory), output_data_dir=output_directory, openai_api_key=openai_api_key)
     
-    # Process all files
     results = flattener.process_all_files()
     
-    # Print summary
     print("\n" + "="*60)
     print("PROCESSING SUMMARY")
     print("="*60)

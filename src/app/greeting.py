@@ -179,9 +179,7 @@ async def handle_generic_query_llm(
             if context_parts:
                 conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is referring to in their query."
         
-        from ..prompts.generic_query_system_prompt import PROMPT as system_prompt
-
-        from ..prompts.generic_query_user_prompt import PROMPT_TEMPLATE as user_prompt_template
+        from ..prompts.generic_query_prompt import PROMPT as system_prompt, PROMPT_TEMPLATE as user_prompt_template
         user_prompt = user_prompt_template.format(
             query=query,
             conversation_context=conversation_context

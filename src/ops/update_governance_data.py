@@ -2,23 +2,20 @@
 import sys
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import fcntl
 import os
 import time
 from dotenv import load_dotenv
 
-# Add the project root to Python path to ensure imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.integrations.slack_bot import SlackBot
 
-# ----------------- LOAD ENV -----------------
 load_dotenv()
 BASE_PATH = os.getenv("BASE_PATH", "/home/ubuntu/pa-ai/polkassembly-ai")
 
-# ----------------- CONFIG -----------------
 PROJECT_ROOT = Path(BASE_PATH)
 LOG_DIR = PROJECT_ROOT / "logs"
 LOCK_FILE = PROJECT_ROOT / ".update_governance_data.lock"
@@ -32,27 +29,23 @@ CLEAN_DIRS = [
 
 SCRIPTS = [
     PROJECT_ROOT / "src/ingestion/onchain/onchain_data.py",
-    PROJECT_ROOT / "src/dynamic_sql/flatten_all_data.py",
-    PROJECT_ROOT / "src/dynamic_sql/create_one_table.py",
-    PROJECT_ROOT / "src/dynamic_sql/filter_data.py",
-    PROJECT_ROOT / "src/dynamic_sql/insert_into_postgres.py",
+    PROJECT_ROOT / "src/ingestion/onchain/flatten_all_data.py",
+    PROJECT_ROOT / "src/ingestion/onchain/create_one_table.py",
+    PROJECT_ROOT / "src/ingestion/onchain/filter_data.py",
+    PROJECT_ROOT / "src/ingestion/onchain/insert_into_postgres.py",
 ]
 
-# 24 hours in seconds
-SLEEP_INTERVAL = 24 * 60 * 60  # 86400 seconds
+SLEEP_INTERVAL = 24 * 60 * 60
 
-# ----------------- LOGGING SETUP -----------------
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 def setup_logger():
     """Setup logger with timestamp-based log file"""
     log_file = LOG_DIR / f"update_{datetime.now():%Y%m%d_%H%M%S}.log"
     
-    # Clear existing handlers
     logger = logging.getLogger(__name__)
     logger.handlers.clear()
     
-    # Setup new handlers
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -67,7 +60,6 @@ def setup_logger():
 
 logger = logging.getLogger(__name__)
 
-# ----------------- SLACK BOT SETUP -----------------
 try:
     slack_bot = SlackBot()
     logger.info("Slack bot initialized successfully")
@@ -75,7 +67,6 @@ except Exception as e:
     logger.warning("Failed to initialize Slack bot: %s", e)
     slack_bot = None
 
-# ----------------- LOCKING -----------------
 def acquire_lock(lock_path: Path):
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     try:
@@ -87,7 +78,6 @@ def acquire_lock(lock_path: Path):
         os.close(lock_fd)
         return None
 
-# ----------------- CLEAN OLD FILES -----------------
 def clean_directories():
     logger.info("Ensuring directories exist and cleaning *.csv / *.json files...")
     for d in CLEAN_DIRS:
@@ -110,7 +100,6 @@ def clean_directories():
                             }
                         )
 
-# ----------------- RUN SCRIPTS -----------------
 def run_script(script_path: Path):
     """Run a script and stream its output to both terminal and log file in real-time."""
     if not script_path.is_file():
@@ -131,30 +120,27 @@ def run_script(script_path: Path):
     logger.info("Running: %s", script_path)
     logger.info("="*60)
     
-    # Run subprocess with real-time output streaming
     process = subprocess.Popen(
         [sys.executable, str(script_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1,  # Line buffered
+        bufsize=1,
         universal_newlines=True
     )
     
-    # Stream output line by line
     output_lines = []
     try:
         for line in process.stdout:
             line = line.rstrip()
-            if line:  # Only print non-empty lines
-                print(line)  # Print to terminal in real-time
+            if line:
+                print(line)
                 output_lines.append(line)
         
-        # Wait for process to complete
         return_code = process.wait()
         
         if return_code != 0:
-            error_output = "\n".join(output_lines[-50:])  # Last 50 lines
+            error_output = "\n".join(output_lines[-50:])
             raise subprocess.CalledProcessError(
                 return_code, 
                 [sys.executable, str(script_path)],
@@ -189,7 +175,6 @@ def run_update_cycle(log_file):
 
         logger.info("===== Update completed successfully =====")
         
-        # Post success notification to Slack
         if slack_bot:
             duration = (datetime.now() - start_time).total_seconds()
             slack_bot.post_to_slack({
@@ -207,10 +192,9 @@ def run_update_cycle(log_file):
             "Script failed with exit code %s: %s\nOutput:\n%s",
             e.returncode,
             e.cmd,
-            e.output if e.output else "No output captured",
+            e.output if e.output else                     "No output captured",
         )
         
-        # Post error to Slack
         if slack_bot:
             slack_bot.post_error_to_slack(
                 error_msg,
@@ -227,7 +211,6 @@ def run_update_cycle(log_file):
         error_msg = f"Unexpected error during governance data update: {str(e)}"
         logger.exception("Unexpected error: %s", e)
         
-        # Post error to Slack
         if slack_bot:
             slack_bot.post_error_to_slack(
                 error_msg,
@@ -240,7 +223,6 @@ def run_update_cycle(log_file):
             )
         
     finally:
-        # Release lock
         if lock_fd is not None:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -254,7 +236,6 @@ def main():
     logger.info("Starting governance data update daemon (runs every 24 hours)")
     logger.info("="*80)
     
-    # Post startup notification to Slack
     if slack_bot:
         slack_bot.post_to_slack({
             "event": "Governance Update Daemon Started",
@@ -272,20 +253,16 @@ def main():
             logger.info(f"Starting iteration #{iteration} at {datetime.now()}")
             logger.info(f"{'='*80}\n")
             
-            # Setup new logger for this iteration
             current_logger, log_file = setup_logger()
             
-            # Run the update cycle
             run_update_cycle(log_file)
             
-            # Calculate next run time
             next_run = datetime.now() + timedelta(seconds=SLEEP_INTERVAL)
             logger.info(f"\n{'='*80}")
             logger.info(f"Iteration #{iteration} completed. Next run at: {next_run}")
             logger.info(f"Sleeping for 24 hours...")
             logger.info(f"{'='*80}\n")
             
-            # Sleep for 24 hours
             time.sleep(SLEEP_INTERVAL)
             
         except KeyboardInterrupt:
@@ -315,11 +292,8 @@ def main():
                     }
                 )
             
-            # Continue running even if there's an error
             logger.info("Continuing to next iteration despite error...")
             time.sleep(SLEEP_INTERVAL)
 
 if __name__ == "__main__":
-    # Need to import timedelta for next_run calculation
-    from datetime import timedelta
     main()

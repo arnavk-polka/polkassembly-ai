@@ -8,10 +8,8 @@ from dotenv import load_dotenv
 
 from src.ingestion.onchain.insert_into_postgres import PostgresInserter
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 

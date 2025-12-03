@@ -9,8 +9,6 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 from src.core.embeddings import EmbeddingManager
 from src.core.text_chunker import TextChunker
 from src.ingestion.data_loader import DataLoader
@@ -28,7 +26,6 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
         logger.warning(f"Data directory not found: {data_path}")
         return documents
     
-    # Get all subdirectories in the static_sources folder
     subdirs = [d for d in data_path.iterdir() if d.is_dir()]
     logger.info(f"Found {len(subdirs)} subdirectories to process: {[d.name for d in subdirs]}")
     
@@ -36,15 +33,12 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
     processed_count = 0
     skipped_count = 0
     
-    # Process each subdirectory
     for subdir in subdirs:
         logger.info(f"\n📁 Processing subdirectory: {subdir.name}")
         
-        # Get all .txt files in this subdirectory
         txt_files = list(subdir.glob("**/*.txt"))
         total_files += len(txt_files)
         
-        # Combine all text files in this subdirectory into one document
         combined_content = []
         combined_metadata = {
             'source': 'static_documentation',
@@ -66,13 +60,11 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
                     skipped_count += 1
                     continue
                 
-                # Parse metadata from file header if present
                 lines = content.split('\n')
                 file_metadata = {}
                 content_start = 0
                 
-                # Extract metadata from header lines
-                for i, line in enumerate(lines[:10]):  # Check first 10 lines for metadata
+                for i, line in enumerate(lines[:10]):
                     if line.startswith('Title: '):
                         file_metadata['title'] = line.replace('Title: ', '').strip()
                         content_start = max(content_start, i + 1)
@@ -89,15 +81,12 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
                         content_start = i + 1
                         break
                 
-                # Use filename as title if no title found
                 if 'title' not in file_metadata:
                     file_metadata['title'] = file_path.stem
                 
-                # Extract main content (skip metadata header)
                 main_content = '\n'.join(lines[content_start:]).strip()
                 
                 if main_content:
-                    # Add file separator and metadata
                     file_header = f"\n\n--- FILE: {file_metadata.get('title', file_path.stem)} ---\n"
                     combined_content.append(file_header + main_content)
                     logger.info(f"    └─ ✅ Added: {len(main_content)} characters, title: '{file_metadata.get('title', 'N/A')}'")
@@ -109,7 +98,6 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
                 logger.error(f"    └─ ❌ Error loading file {file_path.name}: {e}")
                 skipped_count += 1
         
-        # Create combined document for this subdirectory
         if combined_content:
             final_content = '\n'.join(combined_content)
             combined_metadata['title'] = f"{subdir.name} Documentation"
@@ -125,7 +113,6 @@ def load_static_data(data_dir: str) -> List[Dict[str, Any]]:
         else:
             logger.warning(f"  └─ ⚠️  No content found in subdirectory: {subdir.name}")
     
-    # Log summary
     successful_count = len(documents)
     logger.info(f"\n📊 Processing Summary:")
     logger.info(f"  • Total subdirectories: {len(subdirs)}")
@@ -152,13 +139,10 @@ def create_static_embeddings(
         collection_name: Name for the Chroma collection
     """
     try:
-        # Set default data directory if not provided
         if not data_dir:
-            # Use static_sources directory directly instead of joined_data/static
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             data_dir = os.path.join(project_root, "data", "static_sources")
         
-        # Use config values if not provided
         chunk_size = chunk_size or Config.CHUNK_SIZE
         chunk_overlap = chunk_overlap or Config.CHUNK_OVERLAP
         collection_name = collection_name or Config.CHROMA_COLLECTION_NAME
@@ -172,7 +156,6 @@ def create_static_embeddings(
         logger.info(f"🔄 Chunk overlap: {chunk_overlap}")
         logger.info("-" * 60)
         
-        # Initialize components
         chunker = TextChunker(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
@@ -184,11 +167,9 @@ def create_static_embeddings(
             chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY
         )
         
-        # Clear existing collection to start fresh
         logger.info("Clearing existing collection...")
         embedding_manager.clear_collection()
         
-        # Load documents
         documents = load_static_data(data_dir)
         if not documents:
             logger.warning("No static data found")
@@ -196,7 +177,6 @@ def create_static_embeddings(
         
         logger.info(f"Loaded {len(documents)} documents")
         
-        # Process documents into chunks
         logger.info("🔄 Starting text chunking process...")
         all_chunks = []
         for i, doc in enumerate(documents, 1):
@@ -207,7 +187,6 @@ def create_static_embeddings(
         
         logger.info(f"✅ Created {len(all_chunks)} total chunks from {len(documents)} documents")
         
-        # Create embeddings
         logger.info(f"🚀 Creating embeddings for {len(all_chunks)} chunks...")
         embedding_manager.add_chunks_to_collection(all_chunks)
         logger.info("🎉 Successfully created embeddings for static data!")

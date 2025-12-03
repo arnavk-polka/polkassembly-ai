@@ -2,8 +2,7 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 
-from ...prompts.intent_extraction_prompt import PROMPT_TEMPLATE as intent_prompt_template
-from ...prompts.intent_extractor_system_prompt import PROMPT as intent_extractor_system_prompt
+from ...prompts.intent_extraction_prompt import PROMPT as intent_extractor_system_prompt, PROMPT_TEMPLATE as intent_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def extract_sql_intent(natural_query: str, conversation_history: Optional[List[D
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a query intent extractor. Return ONLY valid JSON with no additional text."},
+                    {"role": "system", "content": intent_extractor_system_prompt},
                     {"role": "user", "content": intent_prompt}
                 ],
                 temperature=0.0,

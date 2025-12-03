@@ -12,7 +12,7 @@ from .context_processing import create_context_from_chunks, remove_double_asteri
 from .query_analysis import analyze_query_with_context, format_conversation_history, parse_gemini_response
 from .route_handlers import determine_table_from_query, handle_dynamic_route, handle_hybrid_route
 from .llm_response import get_default_system_prompt, create_user_prompt
-from .response_processing import extract_sources, estimate_confidence, generate_summary
+from .response_processing import extract_sources, estimate_confidence
 from .follow_up_questions import generate_follow_up_questions, get_fallback_follow_ups
 from ..errors import is_insufficient_quota_error, get_quota_error_message
 
@@ -128,8 +128,6 @@ class QAGenerator:
     def _estimate_confidence(self, chunks: List[Dict[str, Any]]) -> float:
         return estimate_confidence(self, chunks)
     
-    def generate_summary(self, chunks: List[Dict[str, Any]]) -> str:
-        return generate_summary(self, chunks)
     
     def _generate_follow_up_questions(self, query: str, chunks: List[Dict[str, Any]], answer: str) -> List[str]:
         return generate_follow_up_questions(self, query, chunks, answer)

@@ -3,8 +3,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from ..utils.model_usage import print_model_usage, GeminiClient, GEMINI_MODEL_NAME, GEMINI_MODEL_SQL, GEMINI_SQL_TIMEOUT, GEMINI_TIMEOUT
-from ...prompts.voting_sql_system_prompt import PROMPT as voting_sql_system_prompt
-from ...prompts.voting_sql_generation_prompt import PROMPT_TEMPLATE as voting_sql_generation_template
+from ...prompts.voting_sql_generation_prompt import PROMPT as voting_sql_system_prompt, PROMPT_TEMPLATE as voting_sql_generation_template
 
 logger = logging.getLogger(__name__)
 

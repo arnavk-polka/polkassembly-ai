@@ -2,8 +2,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from ..utils.model_usage import print_model_usage, GeminiClient, GEMINI_MODEL_NAME, GEMINI_TIMEOUT
-from ...prompts.voting_natural_response_prompt import PROMPT_TEMPLATE as voting_natural_response_template
-from ...prompts.voting_natural_response_system_prompt import PROMPT as voting_natural_response_system_prompt
+from ...prompts.voting_natural_response_prompt import PROMPT as voting_natural_response_system_prompt, PROMPT_TEMPLATE as voting_natural_response_template
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Oct  2 15:23:33 2024
-
-@author: krishnayadav
-"""
-
 import os
 import sys
 import json
@@ -39,7 +31,6 @@ class SlackBot:
             load_override: If True, variables from dotenv will override existing env vars.
             timeout: Requests timeout in seconds.
         """
-        # Load environment variables from .env
         if dotenv_path:
             load_dotenv(dotenv_path=dotenv_path, override=load_override)
         else:
@@ -62,12 +53,10 @@ class SlackBot:
             return message
 
         if isinstance(message, dict):
-            # Stable key ordering for readability
             lines = []
             for key in sorted(message.keys()):
                 val = message[key]
                 try:
-                    # Pretty-print nested structures
                     if isinstance(val, (dict, list)):
                         val_str = json.dumps(val, ensure_ascii=False, indent=2)
                     else:
@@ -77,7 +66,6 @@ class SlackBot:
                 lines.append(f"{key}: {val_str}")
             return "\n".join(lines)
 
-        # Fallback
         return str(message)
 
     def _post(self, text: str) -> None:
@@ -87,7 +75,7 @@ class SlackBot:
         payload = {"text": text}
         try:
             resp = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
-            # Slack returns 200 on success; raise for anything else
+
             if resp.status_code != 200:
                 raise requests.HTTPError(f"{resp.status_code} {resp.text}")
             print("Message posted successfully")
@@ -113,8 +101,7 @@ class SlackBot:
 
 
 if __name__ == "__main__":
-    # Example usage:
-    # .env should contain: SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
-    bot = SlackBot()  # or SlackBot(dotenv_path="/path/to/.env")
+
+    bot = SlackBot() 
     bot.post_to_slack({"event": "deploy", "status": "success", "version": "v1.2.3"})
     bot.post_error_to_slack("Database connection failed", context={"service": "api", "region": "ap-south-1"})

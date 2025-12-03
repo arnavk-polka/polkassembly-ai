@@ -17,7 +17,7 @@ def get_value_from_path(d: Dict[str, Any], path: str) -> Any:
         if isinstance(val, dict) and key in val:
             val = val[key]
         else:
-            return None  # Path not found
+            return None
     return val
 
 def process_vote_data(json_file_path: str, output_dir: str):
@@ -124,7 +124,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
 
-    # File paths from environment (do not hardcode paths)
     from dotenv import load_dotenv
     load_dotenv()
     input_file = os.getenv("VOTING_DATA_INPUT_FILE", "")

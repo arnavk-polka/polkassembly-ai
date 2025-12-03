@@ -38,7 +38,6 @@ class DataLoader:
                     if len(lines) > 3 and lines[3].startswith('Description: '):
                         metadata['description'] = lines[3].replace('Description: ', '').strip()
             
-            # Find the separator line and extract main content
             separator_found = False
             for i, line in enumerate(lines):
                 if '========' in line or '=======' in line:

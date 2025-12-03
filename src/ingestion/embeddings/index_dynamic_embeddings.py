@@ -15,15 +15,11 @@ import logging
 from dotenv import load_dotenv
 from datetime import datetime
 
-# Imports use src.* paths, no sys.path manipulation needed
-
 from src.core.embeddings import EmbeddingManager
 from src.core.config import Config
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -37,7 +33,6 @@ class DynamicEmbeddingsIndexer:
     def __init__(self):
         """Initialize the indexer with database configs and Chroma client"""
         
-        # Governance DB configuration
         self.gov_db_config = {
             'host': os.getenv('POSTGRES_HOST'),
             'port': int(os.getenv('POSTGRES_PORT', '5432')),
@@ -46,7 +41,6 @@ class DynamicEmbeddingsIndexer:
             'password': os.getenv('POSTGRES_PASSWORD')
         }
         
-        # Voting DB configuration
         self.vote_db_config = {
             'host': os.getenv('POSTGRES_HOST_PA'),
             'port': int(os.getenv('POSTGRES_PORT_PA', '5432')),
@@ -55,10 +49,8 @@ class DynamicEmbeddingsIndexer:
             'password': os.getenv('POSTGRES_PASSWORD_PA')
         }
         
-        # Validate configurations
         self._validate_config()
         
-        # Initialize Chroma dynamic collection
         logger.info("Initializing dynamic Chroma collection...")
         self.embedding_manager = None
         self._init_dynamic_collection()
@@ -151,8 +143,6 @@ class DynamicEmbeddingsIndexer:
             with self.get_gov_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Query to select governance data
-                # Use DISTINCT ON to get one row per (network, proposal_index) combination
                 query = """
                     SELECT DISTINCT ON ("source_network", "index")
                         "index" as proposal_index,
@@ -175,7 +165,6 @@ class DynamicEmbeddingsIndexer:
                 logger.info(f"Executing governance query (limit: {limit or 'none'})...")
                 cursor.execute(query)
                 
-                # Process in batches
                 while True:
                     rows = cursor.fetchmany(batch_size)
                     if not rows:
@@ -185,12 +174,10 @@ class DynamicEmbeddingsIndexer:
                     for row in rows:
                         proposal_index, network, title, content, status, created_at, proposal_type = row
                         
-                        # Build stable document ID
                         doc_id = f"gov:{network}:{proposal_index}"
                         
-                        # Build document text
                         document = f"""Network: {network}
-Proposal #{proposal_index}
+Proposal
 Title: {title or 'N/A'}
 Type: {proposal_type or 'N/A'}
 Status: {status or 'N/A'}
@@ -198,7 +185,6 @@ Created: {created_at}
 
 Description: {content[:2000] if content else 'N/A'}"""
                         
-                        # Build metadata
                         metadata = {
                             'source_db': 'governance_db',
                             'table': 'governance_data',
@@ -216,7 +202,6 @@ Description: {content[:2000] if content else 'N/A'}"""
                             'metadata': metadata
                         })
                     
-                    # Add batch to Chroma
                     if batch_chunks:
                         self._add_batch_to_chroma(batch_chunks)
                         total_indexed += len(batch_chunks)
@@ -249,8 +234,6 @@ Description: {content[:2000] if content else 'N/A'}"""
             with self.get_vote_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Query to select voting data
-                # Note: flattened_conviction_votes doesn't have a network column
                 query = """
                     SELECT 
                         main.id,
@@ -274,7 +257,6 @@ Description: {content[:2000] if content else 'N/A'}"""
                 logger.info(f"Executing voting query (limit: {limit or 'none'})...")
                 cursor.execute(query)
                 
-                # Process in batches
                 while True:
                     rows = cursor.fetchmany(batch_size)
                     if not rows:
@@ -284,23 +266,18 @@ Description: {content[:2000] if content else 'N/A'}"""
                     for row in rows:
                         vote_id, voter, proposal_index, decision, created_at, voting_power, vote_type = row
                         
-                        # Derive network from vote type if available (e.g., "ReferendumV2" might indicate network)
-                        # For now, we'll use "unknown" or the vote_type as a fallback
-                        network = "polkadot"  # Default assumption since this is polkadot data
+                        network = "polkadot"
                         
-                        # Build stable document ID
                         doc_id = f"vote:{network}:{proposal_index}:{voter}:{vote_id}"
                         
-                        # Build document text
                         document = f"""Network: {network}
 Voter: {voter}
-Proposal #{proposal_index}
+Proposal
 Decision: {decision or 'N/A'}
 Voting Power: {voting_power or 'N/A'}
 Type: {vote_type or 'N/A'}
 Created: {created_at}"""
                         
-                        # Build metadata
                         metadata = {
                             'source_db': 'voting_db',
                             'table': 'voting_data',
@@ -319,7 +296,6 @@ Created: {created_at}"""
                             'metadata': metadata
                         })
                     
-                    # Add batch to Chroma
                     if batch_chunks:
                         self._add_batch_to_chroma(batch_chunks)
                         total_indexed += len(batch_chunks)
@@ -342,17 +318,12 @@ Created: {created_at}"""
             chunks: List of dicts with 'id', 'content', and 'metadata'
         """
         try:
-            # Extract data
             ids = [chunk['id'] for chunk in chunks]
             documents = [chunk['content'] for chunk in chunks]
             metadatas = [chunk['metadata'] for chunk in chunks]
             
-            # Generate embeddings and add to collection
-            # Using the existing EmbeddingManager's add_chunks_to_collection would regenerate embeddings
-            # So we'll use direct collection.add with our own embedding generation
             embeddings = self.embedding_manager.generate_embeddings(documents)
             
-            # Add to collection (this will upsert if IDs already exist)
             collection = self.get_dynamic_collection()
             collection.add(
                 ids=ids,
@@ -384,19 +355,16 @@ Created: {created_at}"""
             'voting_indexed': 0
         }
         
-        # Index governance data
         try:
             results['governance_indexed'] = self.index_governance_dynamic_embeddings(limit=limit)
         except Exception as e:
             logger.error(f"Failed to index governance data: {e}")
         
-        # Index voting data
         try:
             results['voting_indexed'] = self.index_voting_dynamic_embeddings(limit=limit)
         except Exception as e:
             logger.error(f"Failed to index voting data: {e}")
         
-        # Get final stats
         try:
             collection = self.get_dynamic_collection()
             total_docs = collection.count()
@@ -466,7 +434,6 @@ def main():
             count = collection.count()
             print(f"   Total documents in collection: {count}")
             
-            # Test query
             if count > 0:
                 test_results = collection.query(
                     query_texts=["recent proposals"],

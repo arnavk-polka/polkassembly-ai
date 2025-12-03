@@ -1,5 +1,7 @@
 """Intent extraction prompt for parsing natural language queries into structured intent"""
 
+PROMPT = """You are a query intent extractor. Return ONLY valid JSON with no additional text."""
+
 PROMPT_TEMPLATE = """Extract structured intent from this natural language query about Polkadot/Kusama governance data.
 
 User Query: "{natural_query}"
@@ -27,4 +29,3 @@ Rules:
 - filters: Brief description of any other filters (e.g., "status=active", "title contains X", "amount > Y")
 
 Return ONLY the JSON object, no other text."""
-
