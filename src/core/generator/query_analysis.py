@@ -117,7 +117,7 @@ def analyze_query_with_context(self, query: str, conversation_history: Optional[
         logger.error(f"Error in query analysis: {e}", exc_info=True)
         return query
 
-def format_conversation_history(history: List[Dict[str, Any]]) -> str:
+def format_conversation_history(history: Optional[List[Dict[str, Any]]]) -> str:
     if not history:
         return "No previous conversation"
     

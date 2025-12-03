@@ -7,7 +7,7 @@ import os
 from typing import Dict, Any, Optional, List
 
 from src.core.errors import is_insufficient_quota_error
-from .utils import log_step, _format_conversation_history_for_validation
+from ..pipeline.utils import log_step, _format_conversation_history_for_validation
 
 logger = logging.getLogger(__name__)
 

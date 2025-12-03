@@ -5,11 +5,11 @@ Route-specific handlers for processing queries.
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from ..clarification import generate_clarification_question
-from ..internet_fallback import generate_internet_search_response
-from .utils import log_step, _get_reranker
+from .clarification import generate_clarification_question
+from .internet_fallback import generate_internet_search_response
+from ..pipeline.utils import log_step, _get_reranker
 from .validation import validate_static_answer_with_llm
-from ..greeting import handle_generic_query_llm
+from .greeting import handle_generic_query_llm
 
 
 async def handle_static_route(

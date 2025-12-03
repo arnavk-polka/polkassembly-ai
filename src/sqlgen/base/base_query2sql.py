@@ -4,7 +4,7 @@ from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 
 from .database import get_connection
-from ..utils.token_utils import count_tokens, trim_prompt_to_fit_tokens
+from ..utils.token_utils import trim_prompt_to_fit_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +17,6 @@ class BaseQuery2SQL(ABC):
         self.api_timeout = api_timeout
         self.schema_info = {}
         self.table_schema = ""
-    
-    def count_tokens(self, text: str, model: str = "gpt-4") -> int:
-        """Count tokens in text using tiktoken or approximate counting"""
-        return count_tokens(text, model)
     
     def trim_prompt_to_fit_tokens(self, system_prompt: str, max_tokens: int = 20000, 
                                    completion_tokens: int = 1000, buffer_tokens: int = 500) -> str:

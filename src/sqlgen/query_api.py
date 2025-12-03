@@ -5,12 +5,8 @@ import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-try:
-    from .query2sql import Query2SQL
-except ImportError:
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, current_dir)
-    from query2sql import Query2SQL
+from .governance.query2sql import Query2SQL
+from .voting.vote_query2sql import VoteQuery2SQL
 
 
 try:
@@ -56,7 +52,6 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
     """
     try:
         if table == 'voting_data':
-            from .query2sql import VoteQuery2SQL
             print("Extracting from voting table")
             processor = VoteQuery2SQL()
         else:

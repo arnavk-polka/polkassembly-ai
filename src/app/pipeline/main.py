@@ -5,13 +5,13 @@ Main query processing pipeline orchestration.
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from ..clarification import generate_clarification_question
+from ..handlers.clarification import generate_clarification_question
 from src.core.errors import is_insufficient_quota_error, get_quota_error_message
 from .utils import log_step
-from .ambiguity import is_query_truly_ambiguous
-from .clarification_handler import detect_and_handle_clarification_response
+from ..handlers.ambiguity import is_query_truly_ambiguous
+from ..handlers.clarification_handler import detect_and_handle_clarification_response
 from .routing import route_query_llm
-from .route_handlers import (
+from ..handlers.route_handlers import (
     handle_static_route,
     handle_dynamic_route,
     handle_hybrid_route,

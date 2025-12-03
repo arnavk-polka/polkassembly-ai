@@ -10,7 +10,7 @@ from ...integrations.slack_bot import SlackBot
 from .utils import GEMINI_TIMEOUT
 from .context_processing import create_context_from_chunks, remove_double_asterisks, clean_example_urls
 from .query_analysis import analyze_query_with_context, format_conversation_history, parse_gemini_response
-from .route_handlers import determine_table_from_query, handle_dynamic_route, handle_hybrid_route
+from .sql_handlers import determine_table_from_query, handle_dynamic_route, handle_hybrid_route
 from .llm_response import get_default_system_prompt, create_user_prompt
 from .response_processing import extract_sources, estimate_confidence
 from .follow_up_questions import generate_follow_up_questions, get_fallback_follow_ups

@@ -5,8 +5,8 @@ Clarification detection and query combination logic.
 import logging
 from typing import Dict, Any, Optional, List
 
-from .utils import log_step
-from .routing import route_query_llm
+from ..pipeline.utils import log_step
+from ..pipeline.routing import route_query_llm
 
 logger = logging.getLogger(__name__)
 
