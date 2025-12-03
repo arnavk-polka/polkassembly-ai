@@ -23,82 +23,84 @@ def _gemini_response_has_error(response_text: Optional[str]) -> bool:
     ]
     return any(marker in normalized for marker in error_markers)
 
-def generate_sql_with_model(system_prompt: str, sql_model: str, openai_client, gemini_client) -> str:
+def generate_sql_with_model(system_prompt: str, openai_client, gemini_client) -> str:
     """Generate SQL using Gemini as primary and OpenAI as fallback for voting data"""
-    try:
-        if gemini_client:
+    full_prompt = f"""{voting_sql_system_prompt}
+
+{system_prompt}"""
+    
+    if gemini_client:
+        try:
             print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (voting data)")
             logger.debug("Using Gemini for voting SQL generation")
-            
-            full_prompt = f"""{voting_sql_system_prompt}
-
-{system_prompt}"""
-            
-            try:
-                response = gemini_client.get_response(full_prompt)
-                if _gemini_response_has_error(response):
-                    raise RuntimeError(response)
-                return response.strip()
-            except Exception as e:
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
-                    logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model for voting: {e}")
-                    try:
-                        print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (voting data)")
-                        fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
-                        response = fallback_client.get_response(full_prompt)
-                        if _gemini_response_has_error(response):
-                            raise RuntimeError(response)
-                        logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting SQL generation")
-                        return response.strip()
-                    except Exception as fallback_error:
-                        logger.error(f"Fallback Gemini model also failed for voting: {fallback_error}")
+            response = gemini_client.get_response(full_prompt)
+            if _gemini_response_has_error(response):
+                raise RuntimeError(response)
+            return response.strip()
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
+                logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model for voting: {e}")
+                try:
+                    print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (voting data)")
+                    fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_TIMEOUT)
+                    response = fallback_client.get_response(full_prompt)
+                    if _gemini_response_has_error(response):
+                        raise RuntimeError(response)
+                    logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for voting SQL generation")
+                    return response.strip()
+                except Exception as fallback_error:
+                    logger.error(f"Fallback Gemini model also failed for voting: {fallback_error}")
+                    if openai_client:
+                        logger.info("Falling back to ChatGPT for voting SQL generation")
+                        print_model_usage("GPT-4", "SQL generation fallback (voting data)")
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4",
+                            messages=[
+                                {"role": "system", "content": voting_sql_system_prompt},
+                                {"role": "user", "content": system_prompt}
+                            ],
+                            temperature=0.1,
+                            max_tokens=800
+                        )
+                        return response.choices[0].message.content.strip()
+                    else:
+                        raise e
+            else:
+                if openai_client:
+                    logger.warning(f"Gemini failed, falling back to ChatGPT: {e}")
+                    print_model_usage("GPT-4", "SQL generation fallback (voting data)")
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": voting_sql_system_prompt},
+                            {"role": "user", "content": system_prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=800
+                    )
+                    return response.choices[0].message.content.strip()
                 else:
                     raise e
-        
-        if openai_client:
-            print_model_usage("GPT-4", "SQL generation fallback (voting data)")
-            logger.debug("Using ChatGPT as fallback for voting SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": voting_sql_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        else:
-            raise ValueError("No SQL generation model available for voting data")
-            
-    except Exception as e:
-        logger.error(f"Error in primary SQL model for voting, trying fallback: {e}")
-        
-        if sql_model != 'chatgpt' and openai_client:
-            logger.info("Falling back to ChatGPT for voting SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": voting_sql_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        elif sql_model == 'chatgpt' and gemini_client:
-            logger.info("Falling back to Gemini 2.5 Pro for voting SQL generation")
-            full_prompt = f"""{voting_sql_system_prompt}
-
-{system_prompt}"""
-            response = gemini_client.get_response(full_prompt)
-            return response.strip()
-        else:
-            raise e
+    
+    elif openai_client:
+        print_model_usage("GPT-4", "SQL generation (voting data)")
+        logger.debug("Using ChatGPT for voting SQL generation (Gemini not available)")
+        response = openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": voting_sql_system_prompt},
+                {"role": "user", "content": system_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=800
+        )
+        return response.choices[0].message.content.strip()
+    else:
+        raise ValueError("No SQL generation model available for voting data")
 
 def generate_sql_queries_only_voting(natural_query: str, conversation_history: Optional[List[Dict[str, Any]]], 
-                                    table_schema: str, table_name: str, sql_model: str,
+                                    table_schema: str, table_name: str,
                                     openai_client, gemini_client, trim_prompt_func, max_retries: int = 3) -> List[str]:
     """Generate SQL queries for voting data without executing them"""
     base_system_prompt = voting_sql_generation_template.format(
@@ -112,7 +114,7 @@ def generate_sql_queries_only_voting(natural_query: str, conversation_history: O
             system_prompt = base_system_prompt
             system_prompt = trim_prompt_func(system_prompt)
             
-            response_content = generate_sql_with_model(system_prompt, sql_model, openai_client, gemini_client)
+            response_content = generate_sql_with_model(system_prompt, openai_client, gemini_client)
             response_content = response_content.replace('```json', '').replace('```sql', '').replace('```', '').strip()
             
             try:

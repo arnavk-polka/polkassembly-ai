@@ -30,9 +30,6 @@ class VoteQuery2SQL(BaseQuery2SQL):
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
         
-        self.sql_model = 'gemini'
-        logger.info(f"SQL Model configured for voting: {self.sql_model}")
-        
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.api_timeout = float(os.getenv('API_TIMEOUT', '30'))
         
@@ -40,7 +37,7 @@ class VoteQuery2SQL(BaseQuery2SQL):
         self.db_config = db_config
         
         self.openai_client, self.gemini_client = initialize_clients(
-            self.sql_model, self.openai_api_key, self.api_timeout, force_gemini=True
+            self.openai_api_key, self.api_timeout
         )
         
         self.schema_info = load_schema_info('POSTGRES_SCHEMA_VOTE_PATH')
@@ -65,7 +62,7 @@ class VoteQuery2SQL(BaseQuery2SQL):
             from .sql_generator import generate_sql_queries_only_voting
             sql_queries = generate_sql_queries_only_voting(
                 natural_query, conversation_history, self.table_schema, self.table_name,
-                self.sql_model, self.openai_client, self.gemini_client, self.trim_prompt_to_fit_tokens
+                self.openai_client, self.gemini_client, self.trim_prompt_to_fit_tokens
             )
             
             all_results, connection_error = self.execute_sql_queries(sql_queries)

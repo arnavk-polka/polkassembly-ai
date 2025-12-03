@@ -39,9 +39,6 @@ class Query2SQL(BaseQuery2SQL):
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
         
-        self.sql_model = os.getenv('SQL_MODEL', 'chatgpt').lower()
-        logger.info(f"SQL Model configured: {self.sql_model}")
-        
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.api_timeout = float(os.getenv('API_TIMEOUT', '30'))
         
@@ -49,7 +46,7 @@ class Query2SQL(BaseQuery2SQL):
         self.db_config = db_config
         
         self.openai_client, self.gemini_client = initialize_clients(
-            self.sql_model, self.openai_api_key, self.api_timeout
+            self.openai_api_key, self.api_timeout
         )
         
         self.schema_info = load_schema_info('POSTGRES_SCHEMA_PATH')
@@ -68,7 +65,7 @@ class Query2SQL(BaseQuery2SQL):
         return format_number_for_prompt(value)
     
     def _extract_sql_intent(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        return extract_sql_intent(natural_query, conversation_history, self.sql_model, self.openai_client, self.gemini_client)
+        return extract_sql_intent(natural_query, conversation_history, self.openai_client, self.gemini_client)
     
     def _generate_sql_queries_only(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, max_retries: int = 3) -> List[str]:
         intent = self._extract_sql_intent(natural_query, conversation_history)
@@ -76,7 +73,7 @@ class Query2SQL(BaseQuery2SQL):
         
         return generate_sql_queries_only(
             natural_query, conversation_history, intent, self.embedding_manager,
-            self.table_schema, self.table_name, self.sql_model, self.openai_client,
+            self.table_schema, self.table_name, self.openai_client,
             self.gemini_client, self.trim_prompt_to_fit_tokens, max_retries
         )
     

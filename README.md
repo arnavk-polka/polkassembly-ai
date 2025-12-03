@@ -2,13 +2,15 @@
 
 Live bot: https://klara.polkassembly.io
 
-An AI-powered chatbot system that provides intelligent answers about the Polkadot ecosystem using RAG (Retrieval-Augmented Generation) with OpenAI embeddings and ChromaDB.
+An AI-powered chatbot system that provides intelligent answers about the Polkadot ecosystem using RAG (Retrieval-Augmented Generation) with OpenAI embeddings, ChromaDB, and dynamic SQL generation for on-chain data queries.
 
 ## Features
 
 - 📚 **Knowledge Base**: Built from Polkadot Wiki and Forum data
 - 🔍 **Semantic Search**: Uses OpenAI embeddings for accurate document retrieval
-- 🤖 **AI-Powered Answers**: Generates contextual responses using GPT models
+- 🤖 **AI-Powered Answers**: Generates contextual responses using GPT and Gemini models
+- 🗄️ **Dynamic SQL Generation**: Uses Gemini 2.5 Pro for intelligent SQL query generation from natural language
+- 📊 **On-Chain Data Access**: Direct querying of governance and voting data from PostgreSQL
 - 🚀 **Fast API**: RESTful API with automatic documentation
 - 💾 **Persistent Storage**: ChromaDB for efficient vector storage
 - 🔧 **Configurable**: Environment-based configuration
@@ -31,8 +33,8 @@ cp env.example .env
 # Edit .env with your API keys and data paths
 
 # 3. Create embeddings (see setup.md for details)
-python src/utils/create_static_embeddings.py
-python src/utils/create_dynamic_embeddings.py
+python src/ingestion/embeddings/create_static_embeddings.py
+python src/ingestion/embeddings/index_dynamic_embeddings.py
 
 # 4. Start the API server
 python run_server.py
@@ -116,31 +118,6 @@ GET /rate-limit/{user_id}
 }
 ```
 
-## 🧠 Memory Integration
-
-The system includes **conversation memory** powered by Mem0, enabling context-aware conversations:
-
-### Features
-- **Context Retention**: Remembers previous questions and answers
-- **Smart Follow-ups**: Uses conversation history for better responses
-- **Automatic Memory**: No manual memory management required
-- **Privacy**: Isolated memory per user session
-
-### Memory Flow
-1. **User Query**: System searches memory for relevant context
-2. **Context Injection**: Memory context is added to prompt
-3. **Response Generation**: AI considers both documents and memory
-4. **Memory Storage**: Query and response are automatically stored
-
-### Example Conversation
-```
-User: "What is staking in Polkadot?"
-Bot: "Staking in Polkadot allows DOT holders to..."
-
-User: "What are the rewards for that?"
-Bot: "Staking rewards in Polkadot include..." # Uses memory context
-```
-
 ## Usage Examples
 
 ### Python Client Example
@@ -197,10 +174,12 @@ Main configuration options (see [setup.md](setup.md) for complete list):
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | Your OpenAI API key (required) |
+| `GEMINI_API_KEY` | Your Google Gemini API key (required for SQL generation) |
 | `STATIC_DATA_PATH` | Path to static documentation files |
-| `DYNAMIC_DATA_PATH` | Path to onchain data files |
-| `TAVILY_API_KEY` | API key for web search (optional) |
-| `MEM0_API_KEY` | API key for conversation memory (optional) |
+| `POSTGRES_HOST` | PostgreSQL host for governance data |
+| `POSTGRES_DATABASE` | PostgreSQL database name |
+| `POSTGRES_USER` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | PostgreSQL password |
 
 ## API Documentation
 

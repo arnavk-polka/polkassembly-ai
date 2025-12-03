@@ -7,7 +7,7 @@ from ...prompts.intent_extraction_prompt import PROMPT as intent_extractor_syste
 logger = logging.getLogger(__name__)
 
 def extract_sql_intent(natural_query: str, conversation_history: Optional[List[Dict[str, Any]]], 
-                       sql_model: str, openai_client, gemini_client) -> Dict[str, Any]:
+                       openai_client, gemini_client) -> Dict[str, Any]:
     """
     Extract structured intent from natural language query.
     Returns a deterministic intent object that will be used for SQL generation.
@@ -38,7 +38,30 @@ def extract_sql_intent(natural_query: str, conversation_history: Optional[List[D
     )
 
     try:
-        if sql_model == 'chatgpt' and openai_client:
+        if gemini_client:
+            full_prompt = f"""{intent_extractor_system_prompt}
+
+{intent_prompt}"""
+            try:
+                response_text = gemini_client.get_response(full_prompt).strip()
+            except Exception as e:
+                logger.warning(f"Gemini intent extraction failed, falling back to OpenAI: {e}")
+                if openai_client:
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": intent_extractor_system_prompt},
+                            {"role": "user", "content": intent_prompt}
+                        ],
+                        temperature=0.0,
+                        top_p=1.0,
+                        max_tokens=300
+                    )
+                    response_text = response.choices[0].message.content.strip()
+                else:
+                    logger.warning("No LLM client available for intent extraction, using default intent")
+                    return default_intent
+        elif openai_client:
             response = openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
@@ -50,11 +73,6 @@ def extract_sql_intent(natural_query: str, conversation_history: Optional[List[D
                 max_tokens=300
             )
             response_text = response.choices[0].message.content.strip()
-        elif gemini_client:
-            full_prompt = f"""{intent_extractor_system_prompt}
-
-{intent_prompt}"""
-            response_text = gemini_client.get_response(full_prompt).strip()
         else:
             logger.warning("No LLM client available for intent extraction, using default intent")
             return default_intent

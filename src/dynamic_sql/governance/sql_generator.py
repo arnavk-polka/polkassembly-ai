@@ -8,175 +8,155 @@ from ...prompts.sql_generation_with_intent_prompt import PROMPT as sql_generatio
 
 logger = logging.getLogger(__name__)
 
-def generate_sql_with_model_deterministic(system_prompt: str, sql_model: str, openai_client, gemini_client) -> str:
-    """Generate SQL using deterministic settings (temperature=0, top_p=1, seed=42)"""
-    try:
-        if sql_model == 'chatgpt' and openai_client:
-            print_model_usage("GPT-4", "SQL generation (governance data, deterministic)")
-            logger.debug("Using ChatGPT for deterministic SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.0,
-                top_p=1.0,
-                seed=42,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        elif gemini_client:
+def generate_sql_with_model_deterministic(system_prompt: str, openai_client, gemini_client) -> str:
+    """Generate SQL using deterministic settings (temperature=0, top_p=1, seed=42) - always uses Gemini first"""
+    full_prompt = f"""{sql_generation_system_prompt}
+
+{system_prompt}"""
+    
+    if gemini_client:
+        try:
             print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (governance data, deterministic)")
             logger.debug("Using Gemini for deterministic SQL generation")
-            full_prompt = f"""{sql_generation_system_prompt}
-
-{system_prompt}"""
-            try:
-                response = gemini_client.get_response(full_prompt)
-                return response.strip()
-            except Exception as e:
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
-                    logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model: {e}")
-                    try:
-                        print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
-                        fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
-                        response = fallback_client.get_response(full_prompt)
-                        logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
-                        return response.strip()
-                    except Exception as fallback_error:
-                        logger.error(f"Fallback Gemini model also failed: {fallback_error}")
-                        raise e
-                else:
-                    raise e
-        elif openai_client:
-            print_model_usage("GPT-4", "SQL generation fallback (governance data, deterministic)")
-            logger.debug("Using ChatGPT as fallback for deterministic SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.0,
-                top_p=1.0,
-                seed=42,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        else:
-            raise ValueError("No SQL generation model available")
-    except Exception as e:
-        logger.error(f"Error in deterministic SQL model, trying fallback: {e}")
-        if sql_model != 'chatgpt' and openai_client:
-            logger.info("Falling back to ChatGPT for deterministic SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.0,
-                top_p=1.0,
-                seed=42,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        elif sql_model == 'chatgpt' and gemini_client:
-            logger.info("Falling back to Gemini for deterministic SQL generation")
-            full_prompt = f"""{sql_generation_system_prompt}
-
-{system_prompt}"""
             response = gemini_client.get_response(full_prompt)
             return response.strip()
-        else:
-            raise e
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
+                logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model: {e}")
+                try:
+                    print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
+                    fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
+                    response = fallback_client.get_response(full_prompt)
+                    logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
+                    return response.strip()
+                except Exception as fallback_error:
+                    logger.error(f"Fallback Gemini model also failed: {fallback_error}")
+                    if openai_client:
+                        logger.info("Falling back to ChatGPT for deterministic SQL generation")
+                        print_model_usage("GPT-4", "SQL generation fallback (governance data, deterministic)")
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4",
+                            messages=[
+                                {"role": "system", "content": sql_generation_system_prompt},
+                                {"role": "user", "content": system_prompt}
+                            ],
+                            temperature=0.0,
+                            top_p=1.0,
+                            seed=42,
+                            max_tokens=800
+                        )
+                        return response.choices[0].message.content.strip()
+                    else:
+                        raise e
+            else:
+                if openai_client:
+                    logger.warning(f"Gemini failed, falling back to ChatGPT: {e}")
+                    print_model_usage("GPT-4", "SQL generation fallback (governance data, deterministic)")
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": sql_generation_system_prompt},
+                            {"role": "user", "content": system_prompt}
+                        ],
+                        temperature=0.0,
+                        top_p=1.0,
+                        seed=42,
+                        max_tokens=800
+                    )
+                    return response.choices[0].message.content.strip()
+                else:
+                    raise e
+    
+    elif openai_client:
+        print_model_usage("GPT-4", "SQL generation (governance data, deterministic)")
+        logger.debug("Using ChatGPT for deterministic SQL generation (Gemini not available)")
+        response = openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": sql_generation_system_prompt},
+                {"role": "user", "content": system_prompt}
+            ],
+            temperature=0.0,
+            top_p=1.0,
+            seed=42,
+            max_tokens=800
+        )
+        return response.choices[0].message.content.strip()
+    else:
+        raise ValueError("No SQL generation model available")
 
-def generate_sql_with_model(system_prompt: str, sql_model: str, openai_client, gemini_client, user_message: str = None) -> str:
-    """Generate SQL using the configured model (Gemini or ChatGPT) with fallback for 503 errors"""
-    try:
-        if sql_model == 'chatgpt' and openai_client:
-            print_model_usage("GPT-4", "SQL generation (governance data)")
-            logger.debug("Using ChatGPT for SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-            
-        elif gemini_client:
+def generate_sql_with_model(system_prompt: str, openai_client, gemini_client, user_message: str = None) -> str:
+    """Generate SQL using Gemini as primary, OpenAI as fallback"""
+    full_prompt = f"""{sql_generation_system_prompt}
+
+{system_prompt}"""
+    
+    if gemini_client:
+        try:
             print_model_usage(f"{GEMINI_MODEL_SQL}", "SQL generation (governance data)")
             logger.debug("Using Gemini for SQL generation")
-            
-            full_prompt = f"""{sql_generation_system_prompt}
-
-{system_prompt}"""
-            
-            try:
-                response = gemini_client.get_response(full_prompt)
-                return response.strip()
-            except Exception as e:
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
-                    logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model: {e}")
-                    try:
-                        print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
-                        fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
-                        response = fallback_client.get_response(full_prompt)
-                        logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
-                        return response.strip()
-                    except Exception as fallback_error:
-                        logger.error(f"Fallback Gemini model also failed: {fallback_error}")
-                        raise e
-                else:
-                    raise e
-            
-        elif openai_client:
-            print_model_usage("GPT-4", "SQL generation fallback (governance data)")
-            logger.debug("Using ChatGPT as fallback for SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        else:
-            raise ValueError("No SQL generation model available")
-            
-    except Exception as e:
-        logger.error(f"Error in primary SQL model, trying fallback: {e}")
-        
-        if sql_model != 'chatgpt' and openai_client:
-            logger.info("Falling back to ChatGPT for SQL generation")
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": sql_generation_system_prompt},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=800
-            )
-            return response.choices[0].message.content.strip()
-        elif sql_model == 'chatgpt' and gemini_client:
-            logger.info("Falling back to Gemini 2.5 Pro for SQL generation")
-            full_prompt = f"""{sql_generation_system_prompt}
-
-{system_prompt}"""
             response = gemini_client.get_response(full_prompt)
             return response.strip()
-        else:
-            raise e
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["503", "unavailable", "overloaded", "service unavailable", "model is overloaded"]):
+                logger.warning(f"Gemini SQL model overloaded (503 error), falling back to general Gemini model: {e}")
+                try:
+                    print_model_usage(f"{GEMINI_MODEL_NAME}", "SQL generation fallback (governance data)")
+                    fallback_client = GeminiClient(model_name=GEMINI_MODEL_NAME, timeout=GEMINI_SQL_TIMEOUT)
+                    response = fallback_client.get_response(full_prompt)
+                    logger.info(f"Successfully used fallback Gemini model ({GEMINI_MODEL_NAME}) for SQL generation")
+                    return response.strip()
+                except Exception as fallback_error:
+                    logger.error(f"Fallback Gemini model also failed: {fallback_error}")
+                    if openai_client:
+                        logger.info("Falling back to ChatGPT for SQL generation")
+                        print_model_usage("GPT-4", "SQL generation fallback (governance data)")
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4",
+                            messages=[
+                                {"role": "system", "content": sql_generation_system_prompt},
+                                {"role": "user", "content": system_prompt}
+                            ],
+                            temperature=0.1,
+                            max_tokens=800
+                        )
+                        return response.choices[0].message.content.strip()
+                    else:
+                        raise e
+            else:
+                if openai_client:
+                    logger.warning(f"Gemini failed, falling back to ChatGPT: {e}")
+                    print_model_usage("GPT-4", "SQL generation fallback (governance data)")
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": sql_generation_system_prompt},
+                            {"role": "user", "content": system_prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=800
+                    )
+                    return response.choices[0].message.content.strip()
+                else:
+                    raise e
+    
+    elif openai_client:
+        print_model_usage("GPT-4", "SQL generation (governance data)")
+        logger.debug("Using ChatGPT for SQL generation (Gemini not available)")
+        response = openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": sql_generation_system_prompt},
+                {"role": "user", "content": system_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=800
+        )
+        return response.choices[0].message.content.strip()
+    else:
+        raise ValueError("No SQL generation model available")
 
 def get_governance_context(embedding_manager, natural_query: str) -> str:
     """Retrieve relevant governance proposals from Chroma as contextual examples"""
@@ -268,7 +248,7 @@ def format_conversation_history(conversation_history: Optional[List[Dict[str, An
 
 def generate_sql_queries_only(natural_query: str, conversation_history: Optional[List[Dict[str, Any]]], 
                              intent: Dict[str, Any], embedding_manager, table_schema: str, 
-                             table_name: str, sql_model: str, openai_client, gemini_client,
+                             table_name: str, openai_client, gemini_client,
                              trim_prompt_func, max_retries: int = 3) -> List[str]:
     """Generate SQL queries without executing them - uses intent extraction for deterministic generation"""
     
@@ -329,7 +309,7 @@ def generate_sql_queries_only(natural_query: str, conversation_history: Optional
             system_prompt = base_system_prompt
             system_prompt = trim_prompt_func(system_prompt)
             
-            response_content = generate_sql_with_model_deterministic(system_prompt, sql_model, openai_client, gemini_client)
+            response_content = generate_sql_with_model_deterministic(system_prompt, openai_client, gemini_client)
             response_content = response_content.replace('```json', '').replace('```sql', '').replace('```', '').strip()
             
             try:
