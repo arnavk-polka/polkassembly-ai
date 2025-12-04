@@ -280,16 +280,29 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                     })
         
         try:
-            qa_result = await processUserQuery(
-                userMessage=request.question,
-                conversationHistory=conversation_history_dicts,
-                static_embedding_manager=static_embedding_manager,
-                dynamic_embedding_manager=dynamic_embedding_manager,
-                qa_generator=qa_generator,
-                max_chunks=request.max_chunks,
-                custom_prompt=request.custom_prompt,
-                user_id=request.user_id
-            )
+            if Config.USE_LANGGRAPH:
+                from .langgraph.graph import run_langgraph_query
+                qa_result = await run_langgraph_query(
+                    userMessage=request.question,
+                    conversationHistory=conversation_history_dicts,
+                    static_embedding_manager=static_embedding_manager,
+                    dynamic_embedding_manager=dynamic_embedding_manager,
+                    qa_generator=qa_generator,
+                    max_chunks=request.max_chunks,
+                    custom_prompt=request.custom_prompt,
+                    user_id=request.user_id
+                )
+            else:
+                qa_result = await processUserQuery(
+                    userMessage=request.question,
+                    conversationHistory=conversation_history_dicts,
+                    static_embedding_manager=static_embedding_manager,
+                    dynamic_embedding_manager=dynamic_embedding_manager,
+                    qa_generator=qa_generator,
+                    max_chunks=request.max_chunks,
+                    custom_prompt=request.custom_prompt,
+                    user_id=request.user_id
+                )
         except Exception as qa_error:
             if is_insufficient_quota_error(qa_error):
                 logger.error(f"Insufficient quota error in processUserQuery: {qa_error}")

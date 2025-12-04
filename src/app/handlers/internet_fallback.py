@@ -83,7 +83,7 @@ async def _build_contextual_search_query(query: str, route: Optional[str], qa_ge
         if context_parts:
             conversation_context = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse the conversation history to understand what the user is really asking about."
     
-    from ..prompts.internet_search_query_rewrite_prompt import SYSTEM_PROMPT as internet_search_system_prompt, USER_PROMPT_TEMPLATE as internet_search_user_template
+    from src.prompts.internet_search_query_rewrite_prompt import SYSTEM_PROMPT as internet_search_system_prompt, USER_PROMPT_TEMPLATE as internet_search_user_template
     system_prompt = internet_search_system_prompt
     user_prompt = internet_search_user_template.format(
         query=query,
@@ -173,7 +173,7 @@ async def generate_internet_search_response(
         elif validator_reason:
             validator_context = f"\n\nVALIDATOR NOTE:\n{validator_reason}\n\nThis explains why the SQL query didn't return results."
         
-        from ..prompts.internet_fallback_prompt import PROMPT_TEMPLATE as llm_prompt_template
+        from src.prompts.internet_fallback_prompt import PROMPT_TEMPLATE as llm_prompt_template
         llm_prompt = llm_prompt_template.format(
             query=query,
             conversation_context_for_answer=conversation_context_for_answer,

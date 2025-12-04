@@ -44,6 +44,8 @@ class Config:
     
     ENABLE_SLACK_NOTIFICATIONS = os.getenv("ENABLE_SLACK_NOTIFICATIONS", "false").lower() in ("true", "1", "yes", "on")
     
+    USE_LANGGRAPH = os.getenv("USE_LANGGRAPH", "false").lower() == "true"
+    
     @classmethod
     def validate_config(cls):
         """Validate that required configuration is present"""

@@ -10,6 +10,7 @@ load_dotenv()
 
 REGION = os.environ["AWS_REGION"]
 GUARDRAIL_ID = os.environ["BEDROCK_GUARDRAIL_ID"]
+GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "1")
 
 bedrock_rt = boto3.client("bedrock-runtime", region_name=REGION, config=Config(retries={"max_attempts": 3}))
 

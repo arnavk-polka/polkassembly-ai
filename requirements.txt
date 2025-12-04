@@ -22,6 +22,8 @@ pydantic>=2.0,<3.0
 # Text Processing and Chunking
 langchain==0.2.17
 langchain-text-splitters==0.2.4
+langchain-core>=0.2.43,<0.3.0
+langsmith>=0.1.17,<0.2.0
 
 # HTTP Requests and Web Search
 requests==2.32.4
@@ -61,3 +63,7 @@ google-genai==1.28.0
 
 # AWS SDK (for guardrail)
 boto3==1.35.0
+
+# LangGraph for orchestration
+langgraph>=0.2.0,<0.3.0
+langgraph-cli[inmem]==0.2.1

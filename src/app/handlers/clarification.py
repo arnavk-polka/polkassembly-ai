@@ -155,7 +155,7 @@ async def generate_clarification_question(
     route_context = _build_route_context_section(route)
     conversation_context = _build_conversation_context(conversation_history)
     
-    from ..prompts.clarification_prompt import PROMPT_TEMPLATE as clarification_prompt_template
+    from src.prompts.clarification_prompt import PROMPT_TEMPLATE as clarification_prompt_template
     clarification_prompt = clarification_prompt_template.format(
         query=query,
         normalized_route=normalized_route,

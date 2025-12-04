@@ -11,6 +11,9 @@ chroma_db/
 *.sqlite3
 *.db
 
+# LangGraph runtime cache
+.langgraph_api/
+
 #files
 *.zip
 *.csv
