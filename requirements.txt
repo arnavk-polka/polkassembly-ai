@@ -41,12 +41,10 @@ mem0ai==0.0.11
 
 # Rate Limiting and Caching
 redis==5.0.7
+python-redis-rate-limit>=1.0.0
 
 # Logging and Utilities
 pathlib2==2.3.7
-
-# CORS Middleware (managed by fastapi)
-# starlette is a dependency of fastapi, no need to specify explicitly
 
 # Development and Testing (optional)
 pytest==7.4.3

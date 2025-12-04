@@ -60,8 +60,9 @@ def analyze_query_with_context(self, query: str, conversation_history: Optional[
         )
 
         try:
+            from src.core.config import Config
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=Config.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a query context analyzer. Return only valid JSON."},
                     {"role": "user", "content": analysis_prompt}

@@ -185,7 +185,8 @@ async def handle_generic_query_llm(
             conversation_context=conversation_context
         )
         
-        model_name = "gpt-4o-mini"
+        from src.core.config import Config
+        model_name = Config.OPENAI_MODEL
         
         if hasattr(qa_generator, 'client'):
             try:

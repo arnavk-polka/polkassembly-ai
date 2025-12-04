@@ -94,10 +94,10 @@ def generate_natural_response(natural_query: str, sql_query: str, results: List[
                 else:
                     logger.warning(f"Gemini failed for voting natural response, falling back to OpenAI: {gemini_error}")
         
-        print_model_usage("GPT-4", "natural response generation fallback (voting data)")
+        print_model_usage("GPT-4.1", "natural response generation fallback (voting data)")
         logger.info("Using OpenAI for voting natural response generation (fallback)")
         response = openai_client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": voting_natural_response_system_prompt},
                 {"role": "user", "content": context_prompt}

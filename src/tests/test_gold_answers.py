@@ -135,8 +135,9 @@ Respond with ONLY valid JSON:
 {{"score": "extremely_similar"|"somewhat_similar"|"not_similar", "reason": "brief explanation"}}"""
 
     try:
+        from src.core.config import Config
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=Config.OPENAI_MODEL,
             messages=[
                 {
                     "role": "system",

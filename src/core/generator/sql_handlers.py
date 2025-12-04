@@ -27,8 +27,9 @@ def determine_table_from_query(self, query: str) -> Optional[str]:
                     return "voting_data"
         
         if self.client:
+            from src.core.config import Config
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=Config.OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=50

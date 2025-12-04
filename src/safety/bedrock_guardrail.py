@@ -157,11 +157,12 @@ Example good responses:
 
 Generate the response now:"""
         
+        from src.core.config import Config
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
             lambda: client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=Config.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that explains content moderation decisions in a clear, user-friendly way."},
                     {"role": "user", "content": prompt}

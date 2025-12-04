@@ -62,7 +62,8 @@ async def is_query_truly_ambiguous(query: str, qa_generator, sql_queries: Option
     )
     
     try:
-        model_to_use = "gpt-4o-mini"
+        from src.core.config import Config
+        model_to_use = Config.OPENAI_MODEL
         
         response = qa_generator.client.chat.completions.create(
             model=model_to_use,

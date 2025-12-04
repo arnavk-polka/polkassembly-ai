@@ -48,7 +48,7 @@ def extract_sql_intent(natural_query: str, conversation_history: Optional[List[D
                 logger.warning(f"Gemini intent extraction failed, falling back to OpenAI: {e}")
                 if openai_client:
                     response = openai_client.chat.completions.create(
-                        model="gpt-4",
+                        model="gpt-4.1",
                         messages=[
                             {"role": "system", "content": intent_extractor_system_prompt},
                             {"role": "user", "content": intent_prompt}
@@ -63,7 +63,7 @@ def extract_sql_intent(natural_query: str, conversation_history: Optional[List[D
                     return default_intent
         elif openai_client:
             response = openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": intent_extractor_system_prompt},
                     {"role": "user", "content": intent_prompt}

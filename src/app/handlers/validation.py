@@ -42,8 +42,9 @@ async def validate_static_answer_with_llm(
     )
     
     try:
+        from src.core.config import Config
         response = qa_generator.client.chat.completions.create(
-            model=os.getenv("STATIC_VALIDATION_MODEL", "gpt-4o-mini"),
+            model=os.getenv("STATIC_VALIDATION_MODEL", Config.OPENAI_MODEL),
             messages=[
                 {"role": "system", "content": "You are a validator that only replies 'yes' or 'no'. Reject answers that say they don't have information. Accept answers that provide actual information, even if incomplete."},
                 {"role": "user", "content": validation_prompt}

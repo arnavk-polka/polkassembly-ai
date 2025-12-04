@@ -53,9 +53,9 @@ def generate_sql_with_model(system_prompt: str, openai_client, gemini_client) ->
                         logger.error(f"Fallback Gemini model also failed for voting: {fallback_error}")
         if openai_client:
                         logger.info("Falling back to ChatGPT for voting SQL generation")
-            print_model_usage("GPT-4", "SQL generation fallback (voting data)")
+            print_model_usage("GPT-4.1", "SQL generation fallback (voting data)")
             response = openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": voting_sql_system_prompt},
                     {"role": "user", "content": system_prompt}
@@ -69,9 +69,9 @@ def generate_sql_with_model(system_prompt: str, openai_client, gemini_client) ->
             else:
                 if openai_client:
                     logger.warning(f"Gemini failed, falling back to ChatGPT: {e}")
-                    print_model_usage("GPT-4", "SQL generation fallback (voting data)")
+                    print_model_usage("GPT-4.1", "SQL generation fallback (voting data)")
             response = openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": voting_sql_system_prompt},
                     {"role": "user", "content": system_prompt}
@@ -87,7 +87,7 @@ def generate_sql_with_model(system_prompt: str, openai_client, gemini_client) ->
         print_model_usage("GPT-4", "SQL generation (voting data)")
         logger.debug("Using ChatGPT for voting SQL generation (Gemini not available)")
         response = openai_client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": voting_sql_system_prompt},
                 {"role": "user", "content": system_prompt}

@@ -7,7 +7,7 @@ try:
 except ImportError:
     tiktoken = None
 
-def count_tokens(text: str, model: str = "gpt-4") -> int:
+def count_tokens(text: str, model: str = "gpt-4.1") -> int:
     """Count tokens in text using tiktoken or approximate counting"""
     if tiktoken:
         try:
