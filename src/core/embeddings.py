@@ -185,8 +185,15 @@ class EmbeddingManager:
             List of similar chunks with content, metadata, and similarity scores
         """
         try:
-            if not Config.SEARCH_STATIC_DATA and not Config.SEARCH_DYNAMIC_DATA:
-                logger.info("Both static and dynamic search are disabled")
+            is_static = self.collection_name == Config.CHROMA_COLLECTION_NAME
+            is_dynamic = self.collection_name == Config.CHROMA_DYNAMIC_COLLECTION_NAME
+            is_other = not is_static and not is_dynamic
+            
+            if is_static and not Config.SEARCH_STATIC_DATA:
+                logger.info("Static search is disabled")
+                return []
+            if is_dynamic and not Config.SEARCH_DYNAMIC_DATA:
+                logger.info("Dynamic search is disabled")
                 return []
 
             query_embedding = self.generate_embeddings([query])[0]
@@ -197,48 +204,24 @@ class EmbeddingManager:
             
             results = []
             
-            if Config.SEARCH_STATIC_DATA and self.collection_name == Config.CHROMA_COLLECTION_NAME:
-                static_results = self.collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results,
-                    where=filter_metadata,
-                    include=["documents", "metadatas", "distances"]
-                )
-                if static_results['documents'] and len(static_results['documents']) > 0:
-                    for i in range(len(static_results['documents'][0])):
-                        result = {
-                            'content': static_results['documents'][0][i],
-                            'metadata': static_results['metadatas'][0][i],
-                            'similarity_score': 1 - (static_results['distances'][0][i] / 2),
-                            'source': 'static'
-                        }
-                        results.append(result)
-                    logger.info(f"Found {len(results)} chunks from static data")
-
-            if Config.SEARCH_DYNAMIC_DATA and self.collection_name == Config.CHROMA_DYNAMIC_COLLECTION_NAME:
-                dynamic_results = self.collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results,
-                    where=filter_metadata,
-                    include=["documents", "metadatas", "distances"]
-                )
-                if dynamic_results['documents'] and len(dynamic_results['documents']) > 0:
-                    for i in range(len(dynamic_results['documents'][0])):
-                        result = {
-                            'content': dynamic_results['documents'][0][i],
-                            'metadata': dynamic_results['metadatas'][0][i],
-                            'similarity_score': 1 - (dynamic_results['distances'][0][i] / 2),
-                            'source': 'dynamic'
-                        }
-                        results.append(result)
-                    logger.info(f"Found {len(results)} chunks from dynamic data")
-
-            results.sort(key=lambda x: x['similarity_score'], reverse=True)
-            results = results[:n_results]
-
-            static_count = sum(1 for r in results if r['source'] == 'static')
-            dynamic_count = sum(1 for r in results if r['source'] == 'dynamic')
-            logger.info(f"Returning {static_count} static and {dynamic_count} dynamic results")
+            search_results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=filter_metadata,
+                include=["documents", "metadatas", "distances"]
+            )
+            
+            if search_results['documents'] and len(search_results['documents']) > 0:
+                source_label = 'static' if is_static else ('dynamic' if is_dynamic else self.collection_name)
+                for i in range(len(search_results['documents'][0])):
+                    result = {
+                        'content': search_results['documents'][0][i],
+                        'metadata': search_results['metadatas'][0][i],
+                        'similarity_score': 1 - (search_results['distances'][0][i] / 2),
+                        'source': source_label
+                    }
+                    results.append(result)
+                logger.info(f"Found {len(results)} chunks from {source_label} collection")
             
             return results
             

@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any, Optional, List
 
 from ..pipeline.utils import log_step
-from ..pipeline.routing import route_query_llm
+from ...core.routing import get_router
 
 logger = logging.getLogger(__name__)
 
@@ -198,13 +198,13 @@ async def detect_and_handle_clarification_response(
         "clarification_response": userMessage[:100]
     }, "info")
     
-    route_result = await route_query_llm(
+    router = get_router(qa_generator, log_step)
+    decision = await router.route(
         original_query,
-        conversationHistory[:-1] if conversationHistory else None,
-        qa_generator
+        conversationHistory[:-1] if conversationHistory else None
     )
-    original_route = route_result.get("route", "dynamic")
-    original_router_confidence = route_result.get("confidence", 0.8)
+    original_route = decision.route.value
+    original_router_confidence = decision.confidence
     
     return {
         'combined_query': userMessage,

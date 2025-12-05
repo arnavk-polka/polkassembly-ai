@@ -300,7 +300,8 @@ async def run_langgraph_query(
     qa_generator,
     max_chunks: int = 5,
     custom_prompt: Optional[str] = None,
-    user_id: str = "default_user"
+    user_id: str = "default_user",
+    router_embedding_manager=None
 ) -> Dict[str, Any]:
     """
     Run query through LangGraph pipeline.
@@ -352,6 +353,7 @@ async def run_langgraph_query(
             "custom_prompt": custom_prompt,
             "static_embedding_manager": static_embedding_manager,
             "dynamic_embedding_manager": dynamic_embedding_manager,
+            "router_embedding_manager": router_embedding_manager,
             "qa_generator": qa_generator,
             "guardrail_result": None,
             "is_blocked": False,

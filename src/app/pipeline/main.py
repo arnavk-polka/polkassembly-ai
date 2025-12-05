@@ -10,7 +10,7 @@ from src.core.errors import is_insufficient_quota_error, get_quota_error_message
 from .utils import log_step
 from ..handlers.ambiguity import is_query_truly_ambiguous
 from ..handlers.clarification_handler import detect_and_handle_clarification_response
-from .routing import route_query_llm
+from src.core.routing import get_router, RouterDecision
 from ..handlers.route_handlers import (
     handle_static_route,
     handle_dynamic_route,
@@ -27,7 +27,8 @@ async def processUserQuery(
     qa_generator,
     max_chunks: int = 5,
     custom_prompt: Optional[str] = None,
-    user_id: str = "default_user"
+    user_id: str = "default_user",
+    router_embedding_manager=None
 ) -> Dict[str, Any]:
     """
     Main entry point for processing user queries.
@@ -42,6 +43,7 @@ async def processUserQuery(
         max_chunks: Maximum number of chunks to retrieve
         custom_prompt: Optional custom system prompt
         user_id: User identifier
+        router_embedding_manager: Manager for router example embeddings (for few-shot retrieval)
         
     Returns:
         Dictionary with answer, sources, and metadata
@@ -137,34 +139,30 @@ async def processUserQuery(
             else:
                 is_ambiguous_query = False
         
+        router = get_router(qa_generator, log_step, router_embedding_manager=router_embedding_manager)
+        
         if is_clarification_followup:
             log_step("routing_clarification_followup", {
                 "is_clarification_followup": is_clarification_followup,
                 "query_preview": analyzed_query[:100],
                 "note": "Re-routing clarification response with conversation history for context"
             })
-            route_result = await route_query_llm(
-                analyzed_query,
-                conversationHistory,
-                qa_generator
-            )
-            route = route_result["route"]
-            confidence = route_result["confidence"]
         else:
             log_step("routing_start", {
                 "is_clarification_followup": is_clarification_followup,
                 "query_for_routing": analyzed_query[:100]
             })
-            route_result = await route_query_llm(
-                analyzed_query,
-                conversationHistory,
-                qa_generator
-            )
-            route = route_result["route"]
-            confidence = route_result["confidence"]
+        
+        decision = await router.route(analyzed_query, conversationHistory)
+        route = decision.route.value
+        confidence = decision.confidence
+        
         log_step("routing_complete", {
             "route": route,
             "confidence": confidence,
+            "network": decision.network,
+            "proposal_index": decision.proposal_index,
+            "needs": decision.needs,
             "is_clarification_followup": is_clarification_followup
         })
         

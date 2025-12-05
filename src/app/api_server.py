@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 static_embedding_manager: Optional[EmbeddingManager] = None
 dynamic_embedding_manager: Optional[EmbeddingManager] = None
+router_embedding_manager: Optional[EmbeddingManager] = None
 qa_generator: Optional[QAGenerator] = None
 slack_bot = None
 
@@ -54,7 +55,7 @@ slack_bot = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
-    global static_embedding_manager, dynamic_embedding_manager, qa_generator, slack_bot
+    global static_embedding_manager, dynamic_embedding_manager, router_embedding_manager, qa_generator, slack_bot
     
     try:
         Config.validate_config()
@@ -73,12 +74,21 @@ async def lifespan(app: FastAPI):
             collection_name=Config.CHROMA_DYNAMIC_COLLECTION_NAME
         )
         
-        # Check if collections have data
+        router_embedding_manager = EmbeddingManager(
+            openai_api_key=Config.OPENAI_API_KEY,
+            embedding_model=Config.ROUTER_EMBEDDING_MODEL,
+            chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY,
+            collection_name=Config.CHROMA_ROUTER_COLLECTION_NAME
+        )
+        
         if not static_embedding_manager.collection_exists():
             logger.warning("Static ChromaDB collection is empty. Please run create_embeddings.py first.")
         
         if not dynamic_embedding_manager.collection_exists():
             logger.warning("Dynamic ChromaDB collection is empty. Please run create_dynamic_embeddings.py first.")
+        
+        if not router_embedding_manager.collection_exists():
+            logger.warning("Router ChromaDB collection is empty. Please run create_router_embeddings.py first.")
         
         qa_generator = QAGenerator(
             openai_api_key=Config.OPENAI_API_KEY,
@@ -290,7 +300,8 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                     qa_generator=qa_generator,
                     max_chunks=request.max_chunks,
                     custom_prompt=request.custom_prompt,
-                    user_id=request.user_id
+                    user_id=request.user_id,
+                    router_embedding_manager=router_embedding_manager
                 )
             else:
                 qa_result = await processUserQuery(
@@ -301,7 +312,8 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                     qa_generator=qa_generator,
                     max_chunks=request.max_chunks,
                     custom_prompt=request.custom_prompt,
-                    user_id=request.user_id
+                    user_id=request.user_id,
+                    router_embedding_manager=router_embedding_manager
                 )
         except Exception as qa_error:
             if is_insufficient_quota_error(qa_error):

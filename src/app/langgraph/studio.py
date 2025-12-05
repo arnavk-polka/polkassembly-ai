@@ -21,6 +21,7 @@ from src.app.langgraph.graph import _build_graph
 
 _cached_static_manager = None
 _cached_dynamic_manager = None
+_cached_router_manager = None
 _cached_qa_generator = None
 
 def _get_static_embedding_manager():
@@ -57,6 +58,23 @@ def _get_dynamic_embedding_manager():
             _cached_dynamic_manager = None
     return _cached_dynamic_manager
 
+def _get_router_embedding_manager():
+    global _cached_router_manager
+    if _cached_router_manager is None:
+        try:
+            from src.core.embeddings import EmbeddingManager
+            from src.core.config import Config
+            _cached_router_manager = EmbeddingManager(
+                openai_api_key=Config.OPENAI_API_KEY,
+                embedding_model=Config.ROUTER_EMBEDDING_MODEL,
+                chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY,
+                collection_name=Config.CHROMA_ROUTER_COLLECTION_NAME
+            )
+        except Exception as e:
+            print(f"Warning: Could not init router embedding manager: {e}")
+            _cached_router_manager = None
+    return _cached_router_manager
+
 def _get_qa_generator():
     global _cached_qa_generator
     if _cached_qa_generator is None:
@@ -77,6 +95,7 @@ def get_dependencies():
     return {
         "static_embedding_manager": _get_static_embedding_manager(),
         "dynamic_embedding_manager": _get_dynamic_embedding_manager(),
+        "router_embedding_manager": _get_router_embedding_manager(),
         "qa_generator": _get_qa_generator(),
     }
 
@@ -91,5 +110,6 @@ if __name__ == "__main__":
     deps = get_dependencies()
     print(f"Static manager: {'✅' if deps['static_embedding_manager'] else '❌'}")
     print(f"Dynamic manager: {'✅' if deps['dynamic_embedding_manager'] else '❌'}")
+    print(f"Router manager: {'✅' if deps['router_embedding_manager'] else '❌'}")
     print(f"QA generator: {'✅' if deps['qa_generator'] else '❌'}")
 

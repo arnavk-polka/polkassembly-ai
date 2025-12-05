@@ -17,7 +17,7 @@ from ..handlers.route_handlers import (
     handle_hybrid_route,
     handle_generic_route
 )
-from ..pipeline.routing import route_query_llm
+from ...core.routing import get_router
 from ...safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
 from ...core.errors import is_insufficient_quota_error, get_quota_error_message
 
@@ -27,19 +27,21 @@ def _ensure_dependencies(state: KlaraState) -> tuple:
     """Auto-initialize dependencies if not in state (for Studio mode)"""
     static_mgr = state.get("static_embedding_manager")
     dynamic_mgr = state.get("dynamic_embedding_manager")
+    router_mgr = state.get("router_embedding_manager")
     qa_gen = state.get("qa_generator")
     
-    if not static_mgr or not dynamic_mgr or not qa_gen:
+    if not static_mgr or not dynamic_mgr or not qa_gen or not router_mgr:
         try:
             from .studio import get_dependencies
             deps = get_dependencies()
             static_mgr = static_mgr or deps.get("static_embedding_manager")
             dynamic_mgr = dynamic_mgr or deps.get("dynamic_embedding_manager")
+            router_mgr = router_mgr or deps.get("router_embedding_manager")
             qa_gen = qa_gen or deps.get("qa_generator")
         except Exception as e:
             logger.warning(f"Could not auto-init dependencies: {e}")
     
-    return static_mgr, dynamic_mgr, qa_gen
+    return static_mgr, dynamic_mgr, router_mgr, qa_gen
 
 
 async def safety_node(state: KlaraState) -> Dict[str, Any]:
@@ -125,7 +127,7 @@ async def ambiguity_vote_advice_node(state: KlaraState) -> Dict[str, Any]:
         "is_clarification_followup": state.get("is_clarification_followup", False)
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or query
@@ -198,28 +200,34 @@ async def router_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, router_mgr, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or state.get("query", "")
         
-        route_result = await route_query_llm(
+        router = get_router(qa_gen, log_step, router_embedding_manager=router_mgr)
+        decision = await router.route(
             analyzed_query,
-            state.get("conversation_history"),
-            qa_gen
+            state.get("conversation_history")
         )
         
-        route = route_result.get("route", "static")
-        confidence = route_result.get("confidence", 0.0)
+        route = decision.route.value
+        confidence = decision.confidence
         
         log_step("langgraph_router_node_complete", {
             "route": route,
-            "confidence": confidence
+            "confidence": confidence,
+            "network": decision.network,
+            "proposal_index": decision.proposal_index,
+            "needs": decision.needs
         })
         
         return {
             "route": route,
-            "route_confidence": confidence
+            "route_confidence": confidence,
+            "network": decision.network,
+            "proposal_index": decision.proposal_index,
+            "needs": decision.needs
         }
     except Exception as e:
         logger.error(f"Error in router node: {e}")
@@ -237,7 +245,7 @@ async def planner_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         route = state.get("route", "static")
@@ -285,7 +293,7 @@ async def static_tools_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     logger.info(f"[STATIC] deps: static_mgr={type(static_mgr).__name__}, qa_gen={type(qa_gen).__name__}")
     if not static_mgr or not qa_gen:
@@ -341,7 +349,7 @@ async def dynamic_tools_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or state.get("query", "")
@@ -438,7 +446,7 @@ async def hybrid_tools_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or state.get("query", "")
@@ -494,7 +502,7 @@ async def generic_tools_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or state.get("query", "")
@@ -530,7 +538,7 @@ async def fallback_node(state: KlaraState) -> Dict[str, Any]:
         "query_preview": state.get("analyzed_query") or state.get("query", "")[:100]
     })
     
-    static_mgr, dynamic_mgr, qa_gen = _ensure_dependencies(state)
+    static_mgr, dynamic_mgr, _, qa_gen = _ensure_dependencies(state)
     
     try:
         analyzed_query = state.get("analyzed_query") or state.get("query", "")

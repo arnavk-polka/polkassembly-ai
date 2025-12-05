@@ -11,6 +11,9 @@ class Config:
     CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     CHROMA_COLLECTION_NAME = os.getenv("CHROMA_COLLECTION_NAME", "polkadot_embeddings")
     CHROMA_DYNAMIC_COLLECTION_NAME = os.getenv("CHROMA_DYNAMIC_COLLECTION_NAME", "polkadot_embeddings_dynamic")
+    CHROMA_ROUTER_COLLECTION_NAME = os.getenv("CHROMA_ROUTER_COLLECTION_NAME", "router_examples")
+    
+    ROUTER_EMBEDDING_MODEL = os.getenv("ROUTER_EMBEDDING_MODEL", "text-embedding-3-small")
     
     SEARCH_STATIC_DATA = os.getenv("SEARCH_STATIC_DATA", "true").lower() == "true"
     SEARCH_DYNAMIC_DATA = os.getenv("SEARCH_DYNAMIC_DATA", "true").lower() == "true"

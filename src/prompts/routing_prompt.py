@@ -55,8 +55,6 @@ Available Routes:
    - General knowledge questions about people (e.g., "Who is Gavin Wood", "Who is Satoshi Nakamoto")
    - Questions about individuals that require web search or general knowledge
 
-Respond with ONLY one word from: static, dynamic, hybrid, generic. No explanations.
-
-Now respond for this query:
+Analyze the query and determine the appropriate route.
 """
 

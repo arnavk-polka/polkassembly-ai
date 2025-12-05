@@ -17,6 +17,7 @@ class KlaraState(TypedDict, total=False):
     
     static_embedding_manager: Any
     dynamic_embedding_manager: Any
+    router_embedding_manager: Any
     qa_generator: Any
     
     guardrail_result: Optional[Dict[str, Any]]
