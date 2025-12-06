@@ -850,7 +850,7 @@ async def processUserQuery(
     static_embedding_manager,
     dynamic_embedding_manager,
     qa_generator,
-    max_chunks: int = 15,
+    max_chunks: int = 25,
     custom_prompt: Optional[str] = None,
     user_id: str = "default_user"
 ) -> Dict[str, Any]:
