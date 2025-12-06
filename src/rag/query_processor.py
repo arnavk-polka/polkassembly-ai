@@ -1018,23 +1018,33 @@ async def processUserQuery(
             )
             
             from .semantic_reranker import get_reranker
-            from .chunks_reranker import keyword_filter, final_rerank
+            from .chunks_reranker import (
+                keyword_filter, 
+                final_rerank, 
+                prioritize_polkassembly_chunks,
+                boost_polkassembly_semantic_scores
+            )
             
             reranker = get_reranker()
             
             # 1. Vector search provided static_chunks above
             
-            # 2. Apply keyword filtering
+            # 2. Prioritize Polkassembly chunks before filtering/reranking
+            static_chunks = prioritize_polkassembly_chunks(static_chunks)
+            
+            # 3. Apply keyword filtering (preserves Polkassembly chunks)
             static_chunks = keyword_filter(analyzed_query, static_chunks)
             
-            # 3. Semantic reranking (assigns semantic_score but does not slice)
+            # 4. Semantic reranking (assigns semantic_score but does not slice)
             if reranker:
                 static_chunks = reranker.rerank(analyzed_query, static_chunks)
+                # Boost Polkassembly semantic scores after reranking
+                static_chunks = boost_polkassembly_semantic_scores(static_chunks)
             
-            # 4. Metadata-aware soft re-scoring
+            # 5. Metadata-aware soft re-scoring
             static_chunks = final_rerank(analyzed_query, static_chunks)
             
-            # 5. Limit to max_chunks
+            # 6. Limit to max_chunks
             static_chunks = static_chunks[:max_chunks]
             log_step("static_retrieval_complete", {
                 "chunks_count": len(static_chunks)
