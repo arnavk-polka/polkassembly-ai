@@ -31,13 +31,13 @@ def metadata_priority_score(chunk):
     score = 0.0
 
     if is_polkassembly_chunk(chunk):
-        score += 2.0
+        score += 5.0
 
     if "pa_docs" in str(raw_metadata).lower():
-        score += 0.50
+        score += 2.0
 
     if "polkassembly" in content or "polkassembly" in str(raw_metadata).lower():
-        score += 0.30
+        score += 1.0
 
     if "s3.amazonaws.com" in content:
         score += 0.10
@@ -117,7 +117,7 @@ def boost_polkassembly_semantic_scores(chunks: List[Dict[str, Any]]) -> List[Dic
     """
     for chunk in chunks:
         if is_polkassembly_chunk(chunk) and "semantic_score" in chunk:
-            chunk["semantic_score"] = chunk["semantic_score"] + 2.0
+            chunk["semantic_score"] = chunk["semantic_score"] + 5.0
     
     return chunks
 

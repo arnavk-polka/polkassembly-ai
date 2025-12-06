@@ -850,7 +850,7 @@ async def processUserQuery(
     static_embedding_manager,
     dynamic_embedding_manager,
     qa_generator,
-    max_chunks: int = 25,
+    max_chunks: int = 15,
     custom_prompt: Optional[str] = None,
     user_id: str = "default_user"
 ) -> Dict[str, Any]:
@@ -1011,7 +1011,7 @@ async def processUserQuery(
             # Retrieve more chunks initially to ensure Polkassembly docs are included
             # Polkassembly docs may have lower similarity scores but should be prioritized
             # With reranker, we can efficiently process more chunks
-            initial_chunks_to_retrieve = max(max_chunks * 10, 50)
+            initial_chunks_to_retrieve = max(max_chunks * 15, 100)
             static_chunks = static_embedding_manager.search_similar_chunks(
                 query=analyzed_query,
                 n_results=initial_chunks_to_retrieve

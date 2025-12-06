@@ -181,7 +181,7 @@ class QueryRequest(BaseModel):
     question: str = Field(..., description="The question to ask", min_length=1, max_length=500)
     user_id: str = Field(..., description="Unique user identifier", min_length=1, max_length=100)
     client_ip: str = Field(..., description="Client IP address or client identifier")
-    max_chunks: int = Field(default=5, description="Maximum number of chunks to retrieve", ge=1, le=10)
+    max_chunks: int = Field(default=15, description="Maximum number of chunks to retrieve", ge=1, le=20)
     include_sources: bool = Field(default=True, description="Whether to include source information")
     custom_prompt: Optional[str] = Field(default=None, description="Custom system prompt for the AI")
     conversation_history: Optional[List[ConversationMessage]] = Field(default=[], description="Previous conversation history")
