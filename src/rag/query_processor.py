@@ -1011,7 +1011,7 @@ async def processUserQuery(
             # Retrieve more chunks initially to ensure Polkassembly docs are included
             # Polkassembly docs may have lower similarity scores but should be prioritized
             # With reranker, we can efficiently process more chunks
-            initial_chunks_to_retrieve = max(max_chunks * 15, 100)
+            initial_chunks_to_retrieve = max(max_chunks * 4, 50)
             static_chunks = static_embedding_manager.search_similar_chunks(
                 query=analyzed_query,
                 n_results=initial_chunks_to_retrieve
