@@ -392,22 +392,6 @@ class QAGenerator:
                     "content": content
                 })
 
-            # Tighten context to the most recent assistant + user messages to avoid drifting to older topics
-            recent_focus = []
-            assistant_added = False
-            user_added = False
-            for msg in reversed(serializable_history):
-                if msg["role"] == "assistant" and not assistant_added:
-                    recent_focus.append(msg)
-                    assistant_added = True
-                    continue
-                if msg["role"] == "user" and not user_added:
-                    recent_focus.append(msg)
-                    user_added = True
-                if assistant_added and user_added:
-                    break
-            if assistant_added or user_added:
-                serializable_history = list(reversed(recent_focus))
             
             # Include current date to resolve relative time references
             current_date = datetime.utcnow()

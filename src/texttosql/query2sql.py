@@ -1150,15 +1150,6 @@ class Query2SQL:
             - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
             - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
             
-            PARENT-CHILD BOUNTY RELATIONSHIP:
-            - ChildBounty records are linked to their parent Bounty using the "linkedpost_indexorhash" column
-            - For ChildBounty records: "linkedpost_indexorhash" contains the parent Bounty's "index" value (or NaN if not linked)
-            - CRITICAL: "linkedpost_indexorhash" can be NULL or NaN (stored as float NaN). When filtering, use: linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN' AND linkedpost_indexorhash::text != 'nan'
-            - To find which bounty a child bounty is linked to: JOIN ChildBounty records with Bounty records where ChildBounty."linkedpost_indexorhash" = Bounty."index" AND Bounty."source_proposal_type" = 'Bounty'
-            - To find parent bounties (bounties that have child bounties): Query Bounty records where EXISTS (SELECT 1 FROM governance_data WHERE source_proposal_type = 'ChildBounty' AND linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN' AND linkedpost_indexorhash = Bounty.index)
-            - To show child bounties with their parent: SELECT from ChildBounty, LEFT JOIN with Bounty on linkedpost_indexorhash = index, and CRITICALLY: select b."index" AS parent_bounty_index (from the joined Bounty table), NOT cb."linkedpost_indexorhash" (which may be NaN). Always filter WHERE linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN'
-            - If a query asks for "parent bounties", it means Bounties that have at least one ChildBounty linked to them (not just all Bounties)
-
             FOLLOW-UP ENGAGEMENT:
             - At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. ONLY IF RELEVANT. This is optional and does not have to be done for every query.
             - Make the suggestion conversational and contextually relevant to the data you just presented
