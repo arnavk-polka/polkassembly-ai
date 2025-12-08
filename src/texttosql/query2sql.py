@@ -429,7 +429,7 @@ class Query2SQL:
         
         return enhanced_results
     
-    def count_tokens(self, text: str, model: str = "gpt-4") -> int:
+    def count_tokens(self, text: str, model: str = "gpt-4.1") -> int:
         """
         Count tokens in text using tiktoken or approximate counting
         """
@@ -526,7 +526,7 @@ class Query2SQL:
                 print_model_usage("GPT-4", "SQL generation (governance data, deterministic)")
                 logger.debug("Using ChatGPT for deterministic SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -565,7 +565,7 @@ class Query2SQL:
                 print_model_usage("GPT-4", "SQL generation fallback (governance data, deterministic)")
                 logger.debug("Using ChatGPT as fallback for deterministic SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -583,7 +583,7 @@ class Query2SQL:
             if self.sql_model != 'chatgpt' and self.openai_client:
                 logger.info("Falling back to ChatGPT for deterministic SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -612,7 +612,7 @@ class Query2SQL:
                 print_model_usage("GPT-4", "SQL generation (governance data)")
                 logger.debug("Using ChatGPT for SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -659,7 +659,7 @@ class Query2SQL:
                 print_model_usage("GPT-4", "SQL generation fallback (governance data)")
                 logger.debug("Using ChatGPT as fallback for SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -679,7 +679,7 @@ class Query2SQL:
                 # Gemini failed, try ChatGPT
                 logger.info("Falling back to ChatGPT for SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -1279,7 +1279,7 @@ Return ONLY the JSON object, no other text."""
             # Use deterministic LLM call (temperature=0, top_p=1)
             if self.sql_model == 'chatgpt' and self.openai_client:
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a SQL result validator. Return ONLY valid JSON with no additional text."},
                         {"role": "user", "content": validation_prompt}
@@ -1533,7 +1533,7 @@ Return ONLY the JSON object, no other text."""
             # Use deterministic LLM call (temperature=0, top_p=1)
             if self.sql_model == 'chatgpt' and self.openai_client:
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a query intent extractor. Return ONLY valid JSON with no additional text."},
                         {"role": "user", "content": intent_prompt}
@@ -2580,7 +2580,7 @@ class VoteQuery2SQL:
             logger.error(f"Connection test failed: {e}")
             return False
 
-    def count_tokens(self, text: str, model: str = "gpt-4") -> int:
+    def count_tokens(self, text: str, model: str = "gpt-4.1") -> int:
         """
         Count tokens in text using tiktoken or approximate counting
         """
@@ -2697,7 +2697,7 @@ class VoteQuery2SQL:
                 print_model_usage("GPT-4", "SQL generation fallback (voting data)")
                 logger.debug("Using ChatGPT as fallback for voting SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -2717,7 +2717,7 @@ class VoteQuery2SQL:
                 # Gemini failed, try ChatGPT
                 logger.info("Falling back to ChatGPT for voting SQL generation")
                 response = self.openai_client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1",
                     messages=[
                         {"role": "system", "content": "You are a PostgreSQL expert specializing in voting data. Generate SQL queries based on the provided schema. For complex queries requiring both count and examples, return a JSON array of queries. For simple queries, return a JSON array with one query. Always return valid JSON format."},
                         {"role": "user", "content": system_prompt}
@@ -2916,7 +2916,7 @@ class VoteQuery2SQL:
             print_model_usage("GPT-4", "natural response generation fallback (voting data)")
             logger.info("Using OpenAI for voting natural response generation (fallback)")
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that provides concise, direct answers about voting data. Be brief and to-the-point unless the user specifically asks for detailed analysis or insights. Start with the direct answer, then add context only if needed. CRITICAL: If the on-chain data contains null, NaN, or empty values, DO NOT mention these in your response. Simply omit any fields that have null/NaN/empty values and only present the fields that have actual data. Never say things like \"this value was null\" or \"this field is NaN\" - just skip those fields entirely."},
                     {"role": "user", "content": context_prompt}

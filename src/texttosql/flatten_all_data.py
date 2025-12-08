@@ -275,7 +275,7 @@ class DataFlattener:
             """
             
             response = self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": "You are a data engineering expert specializing in blockchain and governance data. Provide clear, actionable metadata for database design, querying, and query routing decisions."},
                     {"role": "user", "content": prompt}

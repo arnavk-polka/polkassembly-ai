@@ -726,6 +726,7 @@ Available Routes:
    - Wiki pages, how-to guides, tutorials
    - Governance-related "what is", "who is", "how does" questions (e.g., "Who is the most trustable delegate", "What is OpenGov", "What is a delegate")
    - Questions asking for explanations, definitions, or conceptual information about governance/blockchain
+   - "Tell me about [concept]" queries WITHOUT specific referenda/proposal identifiers (e.g., "Tell me about referenda" = general concept explanation → static, but "Tell me about OpenSquare referenda" = specific data → dynamic)
    - "How to" questions about using Polkassembly features
    - Questions about processes, rules, or procedures
    - Questions about delegates, delegation concepts, or how delegation works
@@ -738,7 +739,7 @@ Available Routes:
    - "Show me", "list", "find", "get" queries for proposals/referenda/bounties
    - Questions mentioning numbers (e.g., "Who had the highest voting power in referenda 1232", "What is the status of proposal 123", "Show me the 10 most recent proposals")
    - Questions asking for specific proposal information (title, content, status, dates, network)
-   - Questions about specific referenda ("Tell me about X referenda please" [where X is the referenda id or title])
+   - CRITICAL: "Tell me about [specific referenda/proposal]" queries - if the query mentions a SPECIFIC referenda/proposal by name, ID, or topic (e.g., "Tell me about OpenSquare identity referenda", "Tell me about referenda 123", "Tell me about the staking proposal"), route to DYNAMIC. Only route to static if asking about the general concept (e.g., "Tell me about referenda" without any specific identifier)
    - Proposal metadata (type, proposer, beneficiary, amounts, curator)
    - Questions about specific proposal IDs (e.g., "Who is the curator of 1671", "What is the status of proposal 123")
    - Questions about blockchain addresses (e.g., "Who is 0x163830...", "What proposals did [address] make", "Show me proposals by [address]")

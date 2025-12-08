@@ -166,10 +166,8 @@ async def generate_internet_search_response(
             if context_parts:
                 conversation_context_for_answer = f"\n\nCONVERSATION HISTORY:\n" + "\n".join(context_parts) + "\n\nUse this conversation history to understand the full context of what the user is asking about."
         
-        # Build SQL context if available
+        # Do NOT surface SQL to the model to avoid leaking internals to users
         sql_context = ""
-        if sql_query:
-            sql_context = f"\n\nSQL QUERY ATTEMPTED:\n{sql_query}\n\nNote: This SQL query was generated to answer the user's question but returned no results. The query shows what filters were applied (network, date range, proposal type, status, etc.). Use this to understand exactly what the user is asking for."
         
         validator_context = ""
         if validator_reason:
@@ -184,6 +182,7 @@ Based on your knowledge about Polkadot, Kusama, blockchain governance, and relat
 
 Important guidelines:
 - Directly answer the question: "{query}"
+- Do NOT mention any SQL queries, attempted SQL, internal pipelines, or filters
 - Reference the specific question in your response to show you understand what was asked
 - Focus on Polkadot/Kusama/blockchain governance topics if relevant
 - Keep the response concise and informative

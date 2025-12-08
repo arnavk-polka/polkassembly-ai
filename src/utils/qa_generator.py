@@ -410,6 +410,18 @@ CONVERSATION HISTORY:
 
 CURRENT USER QUERY: "{query}"
 
+CRITICAL RULES FOR FOLLOW-UP QUERIES:
+- If the user says "yes", "show me more details", "tell me more", "more info", "yes show me more details", or similar follow-up phrases, they are asking for MORE INFORMATION about the MOST RECENT item/proposal/bounty/referendum that the assistant just mentioned in the conversation history.
+- Look at the MOST RECENT assistant message in the conversation history to find what was just discussed.
+- Extract the specific entity from the assistant's most recent message:
+  * Look for patterns like "Index: 17", "Index: 1,806", "bounty 17", "referenda 1806", "proposal 123", etc.
+  * Look for entity types: "bounty", "proposal", "referendum", "referenda", "treasury proposal"
+  * Look for network: "Polkadot", "Kusama" (if mentioned)
+- Rewrite the query to ask for details about THAT SPECIFIC ENTITY using the exact index/ID and entity type found.
+- Example: If assistant mentioned "bounty (Index: 17) on Polkadot" and user says "yes show me more details", rewrite as "Show me more details about bounty 17 on Polkadot"
+- DO NOT invent new topics or change the subject to something else mentioned earlier in the conversation.
+- DO NOT use a general query like "show me active referenda" when the user is asking about a specific entity that was just mentioned.
+
 IMPORTANT: 
 - The CURRENT USER QUERY above is the actual query you should analyze
 - Do NOT use clarification questions from the conversation history as the query
@@ -419,12 +431,13 @@ IMPORTANT:
 
 INSTRUCTIONS:
 1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
-2. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
-3. Preserve the user's intent and style
-4. Keep technical terms and column names consistent with previous queries
-5. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
-6. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
-7. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
+2. If the query is a follow-up asking for more details ("yes", "show me more details", "tell me more", etc.) → extract the specific entity from the most recent assistant message and rewrite as "Show me details about [entity type] [ID/index]"
+3. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
+4. Preserve the user's intent and style
+5. Keep technical terms and column names consistent with previous queries
+6. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
+7. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
+8. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
    - "this month" → "{current_month_str}"
    - "last month" → "{last_month_str}"
    - "today" → "{current_date_str}"
@@ -452,6 +465,16 @@ Output: "List all treasury proposals with amount > 1000"
 Example 4:
 Current: "Show me all active referendums"
 Output: "Show me all active referendums" (unchanged - already complete)
+
+Example 5 (FOLLOW-UP QUERY):
+Assistant's most recent message: "I found one proposal related to the 'events' bounty. The 'Community Events Reward Bounty with Child-Bounty Distribution' (Index: 17) on the Polkadot network..."
+Current: "yes show me more details"
+Output: "Show me more details about bounty 17 on Polkadot"
+
+Example 6 (FOLLOW-UP QUERY):
+Assistant's most recent message: "There are 10 active referenda on Polkadot... 1. Index: 1,806 Title: Polkassembly: Shared AI Governance Layer..."
+Current: "show me more details"
+Output: "Show me more details about referenda 1806 on Polkadot" (the FIRST/MOST RECENT one mentioned)
 
 RESPONSE FORMAT:
 Return ONLY a JSON object with this exact structure:

@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DomainMetadataGenerator:
-    def __init__(self, api_key: str, model: str = "gpt-4"):
+    def __init__(self, api_key: str, model: str = "gpt-4.1"):
         """
         Initialize the metadata generator
         
@@ -502,7 +502,7 @@ def main():
     # Initialize generator
     generator = DomainMetadataGenerator(
         api_key=API_KEY,
-        model="gpt-4"  # or "gpt-3.5-turbo" for cheaper option
+        model="gpt-4.1"  # or "gpt-3.5-turbo" for cheaper option
     )
     
     # Generate metadata
