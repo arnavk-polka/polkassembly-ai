@@ -423,6 +423,12 @@ CRITICAL RULES FOR FOLLOW-UP QUERIES:
 - DO NOT invent new topics or change the subject to something else mentioned earlier in the conversation.
 - DO NOT use a general query like "show me active referenda" when the user is asking about a specific entity that was just mentioned.
 
+CRITICAL RULE FOR ENTITY TYPE CHANGES:
+- When the user changes ONLY the entity type (e.g., "proposals" → "treasury proposals", "referenda" → "bounties", "proposals" → "treasury ones"), you MUST preserve ALL filters from the previous query in the conversation history.
+- Filters to preserve include: time/date (e.g., "in July", "in 2023", "last month"), network (e.g., "on Polkadot", "on Kusama"), status (e.g., "active", "executed"), amount ranges, and any other filtering criteria.
+- Look at the PREVIOUS user query in the conversation history to extract all filters, then apply them to the new entity type.
+- Example: If previous query was "show me proposals in July" and current query is "now show me treasury ones", output "show me treasury proposals in July" (preserving the "in July" filter).
+
 IMPORTANT: 
 - The CURRENT USER QUERY above is the actual query you should analyze
 - Do NOT use clarification questions from the conversation history as the query
@@ -434,11 +440,12 @@ INSTRUCTIONS:
 1. If the current query is complete and standalone → return it unchanged (do NOT add extra context)
 2. If the query is a follow-up asking for more details ("yes", "show me more details", "tell me more", etc.) → extract the specific entity from the most recent assistant message and rewrite as "Show me details about [entity type] [ID/index]"
 3. If the query references previous context (e.g., "what about June?", "show recent ones", "their titles too") → rewrite to be complete
-4. Preserve the user's intent and style
-5. Keep technical terms and column names consistent with previous queries
-6. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
-7. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
-8. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
+4. If the query changes ONLY the entity type (e.g., "proposals" → "treasury proposals", "now show me treasury ones") → preserve ALL filters from the previous query (time, network, status, etc.) and apply them to the new entity type
+5. Preserve the user's intent and style
+6. Keep technical terms and column names consistent with previous queries
+7. NEVER return a clarification question as the analyzed query - always use the CURRENT USER QUERY
+8. NEVER add networks (Polkadot, Kusama) or terms like "OpenGov" unless the user already used those words earlier in the conversation.
+9. When the user uses relative time phrases, convert them using today's date ({current_date_str}):
    - "this month" → "{current_month_str}"
    - "last month" → "{last_month_str}"
    - "today" → "{current_date_str}"
@@ -464,15 +471,25 @@ Current: "filter for amount > 1000"
 Output: "List all treasury proposals with amount > 1000"
 
 Example 4:
+Previous: "Show me proposals in July"
+Current: "Now show me treasury ones"
+Output: "Show me treasury proposals in July" (preserved "in July" filter when changing entity type)
+
+Example 5:
+Previous: "Show me referenda on Polkadot in 2023"
+Current: "What about treasury proposals?"
+Output: "Show me treasury proposals on Polkadot in 2023" (preserved both "on Polkadot" and "in 2023" filters)
+
+Example 6:
 Current: "Show me all active referendums"
 Output: "Show me all active referendums" (unchanged - already complete)
 
-Example 5 (FOLLOW-UP QUERY):
+Example 7 (FOLLOW-UP QUERY):
 Assistant's most recent message: "I found one proposal related to the 'events' bounty. The 'Community Events Reward Bounty with Child-Bounty Distribution' (Index: 17) on the Polkadot network..."
 Current: "yes show me more details"
 Output: "Show me more details about bounty 17 on Polkadot"
 
-Example 6 (FOLLOW-UP QUERY):
+Example 8 (FOLLOW-UP QUERY):
 Assistant's most recent message: "There are 10 active referenda on Polkadot... 1. Index: 1,806 Title: Polkassembly: Shared AI Governance Layer..."
 Current: "show me more details"
 Output: "Show me more details about referenda 1806 on Polkadot" (the FIRST/MOST RECENT one mentioned)
