@@ -5,6 +5,7 @@ Internet search fallback for low-confidence queries with no data.
 from typing import Dict, Any, Optional, List
 import logging
 import os
+import requests
 from src.utils.error_handler import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
@@ -173,10 +174,45 @@ async def generate_internet_search_response(
         if validator_reason:
             validator_context = f"\n\nVALIDATOR NOTE:\n{validator_reason}\n\nThis explains why the SQL query didn't return results."
         
+        # Optional Tavily grounding for real snippets
+        tavily_context = ""
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if tavily_api_key:
+            try:
+                log_step("internet_fallback_tavily_attempt", {"query_preview": query[:80]})
+                url = "https://api.tavily.com/search"
+                body = {
+                    "api_key": tavily_api_key,
+                    "query": query,
+                    "max_results": 5,
+                    "search_depth": "basic",
+                }
+                resp = requests.post(url, json=body, timeout=12)
+                if resp.ok:
+                    data = resp.json()
+                    results = data.get("results", []) or []
+                    snippets: List[str] = []
+                    for hit in results[:5]:
+                        title = hit.get("title") or hit.get("url")
+                        snippet = hit.get("content") or hit.get("snippet") or hit.get("description")
+                        if title or snippet:
+                            line = f"- {title or ''}: {snippet or ''}".strip(": ").strip()
+                            if line:
+                                snippets.append(line)
+                    if snippets:
+                        tavily_context = "\n\nWEB CONTEXT (ONLY USE THESE FACTS, DO NOT INVENT):\n" + "\n".join(snippets)
+                        log_step("internet_fallback_tavily_hits", {"hits": len(snippets)})
+                    else:
+                        log_step("internet_fallback_tavily_no_hits", {"hits": len(results)})
+                else:
+                    log_step("internet_fallback_tavily_error", {"status": resp.status_code, "text": resp.text[:200]}, "warning")
+            except Exception as tavily_err:
+                log_step("internet_fallback_tavily_exception", {"error": str(tavily_err)}, "warning")
+
         llm_prompt = f"""
 You are Klara, an AI-powered governance assistant for Polkadot and Kusama on Polkassembly.
 
-A user has asked: "{query}"{conversation_context_for_answer}{sql_context}{validator_context}
+ A user has asked: "{query}"{conversation_context_for_answer}{sql_context}{validator_context}{tavily_context}
 
 Based on your knowledge about Polkadot, Kusama, blockchain governance, and related topics, provide a helpful answer that directly addresses the user's question.
 
@@ -190,7 +226,7 @@ Important guidelines:
 - If you don't know the answer, acknowledge the question and explain what information would be needed
 - DO NOT start with greetings like "Hello" or "As Klara" - just provide the answer directly
 - Make sure your response clearly relates to the question asked
-- CRITICAL: NEVER mention that you cannot access data, don't have access to data, cannot directly access data, or lack access to real-time data. This is a Polkassembly product with full access to Polkadot and Kusama governance data. Answer questions directly as if you have access to all relevant data.
+- CRITICAL: NEVER invent, speculate, or make up any facts. If you cannot find concrete data, say so plainly (e.g., "I couldn't find any on-chain data for that") and stop; do not fill in with guesses.
 - CRITICAL: NEVER generate placeholder data, dummy data, example data, or fake data. Do NOT use placeholders like "[Proposal Hash 1]", "[Short Description]", "[Amount in DOT]", or any other bracketed placeholder text. Only provide real, factual information. If you don't have specific data to share, explain that you couldn't find the specific information requested rather than making up examples.
 - CRITICAL DATE HANDLING: If the query mentions a date (e.g., "October 2025", "in 2025", "last month"), treat it as a FILTER requirement, not a validation check. The user is asking for data FROM that time period. Do NOT say the date is "in the future" or "not available" - instead, explain that no data was found matching those specific filters. Dates in queries are filters to apply to the data, not validation checks about whether the date is valid.
 
@@ -204,7 +240,10 @@ Provide your answer:
             try:
                 response = qa_generator.gemini_client.get_response(llm_prompt)
                 answer_text = response.strip()
-                formatted_answer = answer_text
+                if tavily_context:
+                    formatted_answer = "No data found for that query; here is what I found on the internet:\n" + answer_text
+                else:
+                    formatted_answer = answer_text
                 
                 log_step("internet_fallback_complete", {
                     "response_length": len(formatted_answer),
@@ -254,7 +293,10 @@ CRITICAL DATE HANDLING: If the query mentions a date (e.g., "October 2025", "in 
                 )
                 answer = response.choices[0].message.content
                 answer_text = answer.strip()
-                formatted_answer = answer_text
+                if tavily_context:
+                    formatted_answer = "No on-chain data matched; here is what I found via internet search:\n" + answer_text
+                else:
+                    formatted_answer = answer_text
                 
                 log_step("internet_fallback_complete", {
                     "response_length": len(formatted_answer),
