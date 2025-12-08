@@ -1,5 +1,6 @@
 import json
 from logging import Logger
+import logging
 import sys
 import os
 from typing import Optional, List, Dict, Any
@@ -8,6 +9,9 @@ from datetime import datetime
 from .governance.query2sql import Query2SQL
 from .voting.vote_query2sql import VoteQuery2SQL
 
+logger = logging.getLogger(__name__)
+
+USE_TOOL_BASED_QUERIES = os.getenv('USE_TOOL_BASED_QUERIES', 'true').lower() == 'true'
 
 try:
     from ..integrations.slack_bot import SlackBot
@@ -37,9 +41,21 @@ def send_error_to_slack(query: str, error: str, error_source: str = "Query2SQL")
     except Exception as slack_error:
         print(f"Failed to send error notification to Slack: {slack_error}")
 
+
+def ask_question_tool_based(question: str, conversation_history: Optional[List[Dict[str, Any]]] = None, table: Optional[str] = None, embedding_manager=None) -> dict:
+    """
+    Process query using tool-based SQL generation (new approach).
+    Falls back to LLM SQL if tools fail.
+    """
+    from .tool_query_api import ask_question_with_tools
+    return ask_question_with_tools(question, conversation_history, table, embedding_manager, use_fallback=True)
+
+
 def ask_question(question: str, conversation_history: Optional[List[Dict[str, Any]]] = None, table: Optional[str] = None, embedding_manager=None) -> dict:
     """
-    Simple function to ask a natural language question and get results
+    Process a natural language question and get results.
+    Uses tool-based SQL generation by default (controlled by USE_TOOL_BASED_QUERIES env var).
+    Falls back to LLM-based SQL generation if tools fail.
     
     Args:
         question (str): Natural language question about governance or voting data
@@ -50,6 +66,16 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
     Returns:
         dict: Response containing SQL query, results, and natural language answer
     """
+    if USE_TOOL_BASED_QUERIES and table != 'voting_data':
+        logger.info("Using tool-based query processing")
+        try:
+            result = ask_question_tool_based(question, conversation_history, table, embedding_manager)
+            if result.get("success") or not result.get("requires_fallback", True):
+                return result
+            logger.info("Tool-based query needs fallback, using LLM SQL generation")
+        except Exception as e:
+            logger.warning(f"Tool-based query failed, falling back to LLM: {e}")
+    
     try:
         if table == 'voting_data':
             print("Extracting from voting table")
