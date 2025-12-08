@@ -1149,6 +1149,15 @@ class Query2SQL:
             - If a user asks about curator for a Bounty/ChildBounty and it's null, explain: "This bounty does not have a curator assigned yet."
             - TreasuryProposals use "reward" field, not "beneficiaries_0_amount" - they don't have beneficiaries array
             - Always consider the proposal type when explaining missing fields - some fields are specific to certain proposal types
+            
+            PARENT-CHILD BOUNTY RELATIONSHIP:
+            - ChildBounty records are linked to their parent Bounty using the "linkedpost_indexorhash" column
+            - For ChildBounty records: "linkedpost_indexorhash" contains the parent Bounty's "index" value (or NaN if not linked)
+            - CRITICAL: "linkedpost_indexorhash" can be NULL or NaN (stored as float NaN). When filtering, use: linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN' AND linkedpost_indexorhash::text != 'nan'
+            - To find which bounty a child bounty is linked to: JOIN ChildBounty records with Bounty records where ChildBounty."linkedpost_indexorhash" = Bounty."index" AND Bounty."source_proposal_type" = 'Bounty'
+            - To find parent bounties (bounties that have child bounties): Query Bounty records where EXISTS (SELECT 1 FROM governance_data WHERE source_proposal_type = 'ChildBounty' AND linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN' AND linkedpost_indexorhash = Bounty.index)
+            - To show child bounties with their parent: SELECT from ChildBounty, LEFT JOIN with Bounty on linkedpost_indexorhash = index, and CRITICALLY: select b."index" AS parent_bounty_index (from the joined Bounty table), NOT cb."linkedpost_indexorhash" (which may be NaN). Always filter WHERE linkedpost_indexorhash IS NOT NULL AND linkedpost_indexorhash != 'NaN'
+            - If a query asks for "parent bounties", it means Bounties that have at least one ChildBounty linked to them (not just all Bounties)
 
             FOLLOW-UP ENGAGEMENT:
             - At the end of your response, naturally suggest a relevant follow-up question to help the user explore further. ONLY IF RELEVANT. This is optional and does not have to be done for every query.
@@ -1520,6 +1529,7 @@ You must return ONLY valid JSON with these exact keys:
 
 Rules:
 - entity_type: Determine what the user is asking about (referenda, treasury proposals, bounties, discussions, voters, delegates, or unknown)
+- CRITICAL DEFAULT RULE: The word "proposal" by itself defaults to "referenda". ONLY use "treasury_proposal" if the user explicitly mentions the word "treasury" (e.g., "treasury proposal", "treasury request", "treasury track"). There is no reason to use "TreasuryProposal" unless "treasury" is explicitly mentioned in the query.
 - If the query mentions "discussion" or asks about a discussion post, use entity_type: "discussion. Also ref means referendum and referenda."
 - network: Extract network preference (polkadot, kusama, both, or unspecified if not mentioned)
 - id: Extract specific proposal/referendum ID if mentioned (number or null)
@@ -1823,6 +1833,7 @@ DATABASE SCHEMA:
                - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
                - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
                - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
+               - CRITICAL: Tips (source_proposal_type = 'Tip') do NOT have onchaininfo_origin populated. Tips are funded from the treasury but do not use tracks/origins. If a query asks for tips with a track/origin filter, ignore the track filter and only filter by source_proposal_type = 'Tip'
             11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
                - The datasource field may have different values, be NULL, or not be a reliable filter
                - For URL-based queries, only use "index" and "source_network" to find proposals
@@ -2073,6 +2084,7 @@ DATABASE SCHEMA:
                - Values are stored in camelCase: 'BigSpender', 'MediumSpender', 'SmallSpender', 'BigTipper', 'SmallTipper', etc.
                - Map user queries to exact values: "big spender" -> 'BigSpender', "medium spender" -> 'MediumSpender', "small spender" -> 'SmallSpender'
                - Example: WHERE "onchaininfo_origin" = 'BigSpender' (NOT ILIKE 'big_spender' or ILIKE 'big spender')
+               - CRITICAL: Tips (source_proposal_type = 'Tip') do NOT have onchaininfo_origin populated. Tips are funded from the treasury but do not use tracks/origins. If a query asks for tips with a track/origin filter, ignore the track filter and only filter by source_proposal_type = 'Tip'
             11. CRITICAL: Do NOT filter by "datasource" column unless explicitly requested by the user
                - The datasource field may have different values, be NULL, or not be a reliable filter
                - For URL-based queries, only use "index" and "source_network" to find proposals
@@ -2205,6 +2217,7 @@ DATABASE SCHEMA:
              - "Show me proposal amounts" -> SELECT "title", "onchaininfo_beneficiaries_0_assetid", "index", "onchaininfo_beneficiaries_0_amount", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "onchaininfo_beneficiaries_0_amount" IS NOT NULL AND "onchaininfo_beneficiaries_0_amount" != 'NaN' ORDER BY "createdat" DESC LIMIT 10;
              - "Show me all proposals ordered by date" -> SELECT "title", "index", "onchaininfo_status", "createdat", COUNT(*) OVER() as total_count FROM {self.table_name} ORDER BY "createdat" DESC NULLS LAST LIMIT 10;
              - "Who is 0x163830..." or "What proposals did [address] make" -> Search across all address fields using ILIKE with partial match. Extract the address portion from query (e.g., "163830" from "0x163830...ah6") and search: SELECT "title", "index", "onchaininfo_proposer", "onchaininfo_status", "source_proposal_type", "createdat", "publicuser_username", "onchaininfo_beneficiaries_0_address", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE ("onchaininfo_proposer" ILIKE '%163830%' AND "onchaininfo_proposer" IS NOT NULL) OR ("onchaininfo_beneficiaries_0_address" ILIKE '%163830%' AND "onchaininfo_beneficiaries_0_address" IS NOT NULL) OR ("publicuser_addresses_0" ILIKE '%163830%' AND "publicuser_addresses_0" IS NOT NULL) OR ("publicuser_addresses_1" ILIKE '%163830%' AND "publicuser_addresses_1" IS NOT NULL) OR ("publicuser_addresses_2" ILIKE '%163830%' AND "publicuser_addresses_2" IS NOT NULL) OR ("publicuser_addresses_3" ILIKE '%163830%' AND "publicuser_addresses_3" IS NOT NULL) OR ("publicuser_addresses_4" ILIKE '%163830%' AND "publicuser_addresses_4" IS NOT NULL) ORDER BY "createdat" DESC LIMIT 10;
+             - "What are the latest tips created under treasury track?" -> CRITICAL: Tips (source_proposal_type = 'Tip') do NOT have onchaininfo_origin populated. Tips are funded from the treasury but do not use tracks/origins like treasury proposals. Do NOT filter by onchaininfo_origin for tips. Correct query: SELECT "index", "title", "onchaininfo_status", "createdat", "source_network", "onchaininfo_reward", "onchaininfo_beneficiaries_0_address", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE "source_proposal_type" = 'Tip' AND "createdat" IS NOT NULL ORDER BY "createdat" DESC LIMIT 10;
             
             Multiple Query Examples:
             - "How many proposals in August 2025 and name a few?" -> ["SELECT COUNT(*) as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL;", "SELECT \"title\", \"index\", \"onchaininfo_status\", \"createdat\", COUNT(*) OVER() as total_count FROM {self.table_name} WHERE DATE_TRUNC('month', \"createdat\") = '2025-08-01' AND \"createdat\" IS NOT NULL ORDER BY \"createdat\" DESC LIMIT 10;"]

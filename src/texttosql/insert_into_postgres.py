@@ -155,6 +155,10 @@ class PostgresInserter:
     def _infer_postgres_type(self, column_name: str, series: pd.Series) -> str:
         """Infer PostgreSQL data type from schema info or pandas Series"""
         
+        if column_name == 'linkedpost_indexorhash':
+            logger.info(f"Column {column_name} contains mixed types (index or hash), using TEXT")
+            return 'TEXT'
+        
         # First, check if we have schema information for this column
         if self.schema_info and column_name in self.schema_info:
             schema_type = self.schema_info[column_name].get('data_type', '').lower()
@@ -165,6 +169,23 @@ class PostgresInserter:
             elif schema_type in ['datetime', 'timestamp']:
                 return 'TIMESTAMP'
             elif schema_type in ['int64', 'integer', 'int']:
+                # Check if column contains mixed types (numbers and strings)
+                # This can happen if the schema says int64 but actual data has strings
+                non_null_data = series.dropna()
+                if len(non_null_data) > 0:
+                    # Check if any values are strings that can't be converted to numbers
+                    has_strings = False
+                    for val in non_null_data.head(100):  # Sample first 100 values
+                        if isinstance(val, str):
+                            # Check if it's a hash (starts with 0x) or contains non-numeric chars
+                            if val.startswith('0x') or not val.replace('.', '').replace('-', '').isdigit():
+                                has_strings = True
+                                break
+                    
+                    if has_strings:
+                        logger.info(f"Column {column_name} (schema: {schema_type}) contains mixed types, using TEXT instead of NUMERIC")
+                        return 'TEXT'
+                
                 # Use NUMERIC for all integer types to avoid BIGINT range issues
                 logger.info(f"Column {column_name} (schema: {schema_type}) using NUMERIC for safety")
                 return 'NUMERIC'
@@ -490,6 +511,9 @@ CREATE TABLE {self.table_name} (
                 if isinstance(value, str):
                     value = value.strip()
                     if value == '':
+                        return None
+                    if value.startswith('0x') or not value.replace('.', '').replace('-', '').replace('e', '').replace('E', '').replace('+', '').isdigit():
+                        logger.warning(f"Attempted to convert non-numeric value '{value[:20]}...' to float, returning None")
                         return None
                 
                 float_val = float(value)

@@ -391,6 +391,23 @@ class QAGenerator:
                     "role": role,
                     "content": content
                 })
+
+            # Tighten context to the most recent assistant + user messages to avoid drifting to older topics
+            recent_focus = []
+            assistant_added = False
+            user_added = False
+            for msg in reversed(serializable_history):
+                if msg["role"] == "assistant" and not assistant_added:
+                    recent_focus.append(msg)
+                    assistant_added = True
+                    continue
+                if msg["role"] == "user" and not user_added:
+                    recent_focus.append(msg)
+                    user_added = True
+                if assistant_added and user_added:
+                    break
+            if assistant_added or user_added:
+                serializable_history = list(reversed(recent_focus))
             
             # Include current date to resolve relative time references
             current_date = datetime.utcnow()
@@ -412,7 +429,7 @@ CURRENT USER QUERY: "{query}"
 
 CRITICAL RULES FOR FOLLOW-UP QUERIES:
 - If the user says "yes", "show me more details", "tell me more", "more info", "yes show me more details", or similar follow-up phrases, they are asking for MORE INFORMATION about the MOST RECENT item/proposal/bounty/referendum that the assistant just mentioned in the conversation history.
-- Look at the MOST RECENT assistant message in the conversation history to find what was just discussed.
+- Look ONLY at the LAST assistant message in the conversation history (the one with the highest number in the list above) to find what was just discussed.
 - Extract the specific entity from the assistant's most recent message:
   * Look for patterns like "Index: 17", "Index: 1,806", "bounty 17", "referenda 1806", "proposal 123", etc.
   * Look for entity types: "bounty", "proposal", "referendum", "referenda", "treasury proposal"
