@@ -3,21 +3,21 @@
 PROMPT_TEMPLATE = """
 Convert these multiple query results into a unified natural response.
 
-Conversation History:
-{history_text}
-
-Current Query: {natural_query}
+            Conversation History:
+            {history_text}
+            
+            Current Query: {natural_query}
 
 Database Results:
-{db_result}
-
+            {db_result}
+            
 RESPONSE GUIDELINES:
 
 1. COMBINE RESULTS: Synthesize information from all queries into a coherent answer
 2. BE CONCISE: 50-300 words ideal
 3. ANSWER DIRECTLY: Start with the main answer to the user's question
-
-DATA PRESENTATION:
+            
+            DATA PRESENTATION:
 - For COUNT + EXAMPLES queries: State the count, then show examples
 - Use 'proposal_link' or 'proposal_link_display' for URLs
 - Use 'amount_formatted' or 'amount_display' for currency amounts

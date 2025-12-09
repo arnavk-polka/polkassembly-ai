@@ -13,6 +13,8 @@ TOOL_SELECTION_PROMPT = '''You are a tool selector for a blockchain governance q
 AVAILABLE TOOLS:
 {tool_descriptions}
 
+IMPORTANT: For queries about VOTE COUNTS ("how many votes", "number of votes", "total votes"), prioritize voting tools (count_voters, get_vote_stats) over governance tools (get_proposal_vote_stats). Voting tools count individual vote records from the voting_data table, which is more accurate than aggregated metrics.
+
 USER QUERY: {query}
 
 CONVERSATION CONTEXT:
@@ -172,10 +174,16 @@ class ToolSelector:
                     "params": {"proposal_index": proposal_index, "network": network},
                     "confidence": 0.95
                 }
+            elif any(phrase in query_lower for phrase in ["how many votes", "vote count", "number of votes", "votes received", "total votes"]):
+                return {
+                    "tool": "count_voters",
+                    "params": {"proposal_index": proposal_index},
+                    "confidence": 0.95
+                }
             elif any(word in query_lower for word in ["vote", "voting", "aye", "nay"]):
                 return {
-                    "tool": "get_proposal_vote_stats",
-                    "params": {"proposal_index": proposal_index, "network": network},
+                    "tool": "get_vote_stats",
+                    "params": {"proposal_index": proposal_index},
                     "confidence": 0.95
                 }
             else:

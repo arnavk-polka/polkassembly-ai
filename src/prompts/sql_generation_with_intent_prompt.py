@@ -49,17 +49,17 @@ DATABASE SCHEMA:
 {table_schema}
 {governance_context}
 
-CORE SQL GUIDELINES:
-1. Use ONLY existing columns from the schema above
-2. Table name: {table_name}
-3. Use proper PostgreSQL syntax with double quotes for column names
-4. Apply appropriate LIMIT clauses:
+            CORE SQL GUIDELINES:
+            1. Use ONLY existing columns from the schema above
+            2. Table name: {table_name}
+            3. Use proper PostgreSQL syntax with double quotes for column names
+            4. Apply appropriate LIMIT clauses:
    - Use LIMIT 1 for SINGULAR queries
    - Use LIMIT 10 for PLURAL queries
-   - No LIMIT for count/aggregate queries
+               - No LIMIT for count/aggregate queries
 5. AUTOMATIC NULL HANDLING: For ANY column used in WHERE, ORDER BY, or filtering conditions, ALWAYS add "column_name IS NOT NULL"
 
-DATA FILTERING RULES:
+            DATA FILTERING RULES:
 - Network filtering: Use 'source_network' column (values: 'polkadot', 'kusama')
 - Proposal types: Use 'source_proposal_type' column
 - Map entity_type to source_proposal_type:
@@ -77,10 +77,10 @@ DATA FILTERING RULES:
 
 STATUS VALUE MAPPING:
 - For REFERENDUMS:
-  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
+                  * "active" -> IN ('DecisionDepositPlaced', 'Submitted', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
   * "voting" -> IN ('DecisionDepositPlaced', 'Deciding', 'ConfirmStarted', 'ConfirmAborted')
-  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
-  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
+                  * "passed" -> IN ('Passed', 'Executed', 'Confirmed')
+                  * "failed" -> IN ('Cancelled', 'TimedOut', 'Rejected', 'Killed', 'ExecutionFailed')
 - For TREASURY PROPOSALS:
   * "executed" -> "Awarded" (NOT "Executed")
 - For BOUNTIES:
@@ -96,18 +96,18 @@ AMOUNT COLUMNS:
 - "onchaininfo_beneficiaries_0_amount": Spending amounts (for referenda, treasury spending tracks)
 - "onchaininfo_reward": Reward for tips/bounties and TreasuryProposals
 - ALWAYS include "onchaininfo_beneficiaries_0_assetid" with amount queries
-
-MULTIPLE QUERIES STRATEGY:
+            
+            MULTIPLE QUERIES STRATEGY:
 - If query asks for COUNT and EXAMPLES, return 2 queries as JSON array
 - Return queries as: ["query1", "query2"]
-
-WINDOW FUNCTION FOR COUNT:
+            
+            WINDOW FUNCTION FOR COUNT:
 - When using LIMIT, include COUNT(*) OVER() as total_count
 - Example: SELECT "title", "index", COUNT(*) OVER() as total_count FROM table WHERE conditions LIMIT 10
 
 IMPORTANT: Default filter source_proposal_type = 'ReferendumV2' unless otherwise specified.
-
-Natural Language Query: {natural_query}
-
-SQL Query:
-"""
+            
+            Natural Language Query: {natural_query}
+            
+            SQL Query:
+            """

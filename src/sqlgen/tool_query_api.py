@@ -4,6 +4,8 @@ import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+USE_TOOL_BASED_QUERIES = os.getenv('USE_TOOL_BASED_QUERIES', 'true').lower() == 'true'
+
 from .tools.query_processor import ToolBasedQueryProcessor, create_tool_processor
 from .governance.response_generator import generate_natural_response
 from .governance.result_processor import format_amount_by_asset_id, add_proposal_links
@@ -63,6 +65,59 @@ def ask_question_with_tools(
     """
     
     if table == 'voting_data':
+        if USE_TOOL_BASED_QUERIES:
+            try:
+                tool_processor = create_tool_processor(embedding_manager, table='voting_data')
+                result = tool_processor.process_query(question, conversation_history)
+                if result.get("success") and result.get("result_count", 0) > 0:
+                    from openai import OpenAI
+                    from src.core.gemini_client import GeminiClient
+                    from .voting.response_generator import generate_natural_response as generate_voting_response
+                    
+                    openai_client = None
+                    gemini_client = None
+                    
+                    openai_key = os.getenv('OPENAI_API_KEY')
+                    if openai_key:
+                        openai_client = OpenAI(api_key=openai_key)
+                    
+                    try:
+                        gemini_client = GeminiClient()
+                    except:
+                        pass
+                    
+                    results = result.get("results", [])
+                    columns = result.get("columns", [])
+                    sql_query = result.get("sql_queries", [""])[0] if result.get("sql_queries") else ""
+                    
+                    # Convert dict format to list format for voting response generator
+                    if results and isinstance(results[0], dict):
+                        results_list = [[row.get(col) for col in columns] for row in results]
+                    elif results and isinstance(results[0], list):
+                        results_list = results
+                    else:
+                        results_list = []
+                    
+                    try:
+                        natural_response = generate_voting_response(
+                            question, sql_query, results_list, columns, conversation_history,
+                            gemini_client, openai_client
+                        )
+                        result["natural_response"] = natural_response
+                    except Exception as e:
+                        logger.warning(f"Failed to generate natural response for voting tool result: {e}")
+                        if results:
+                            result["natural_response"] = _generate_simple_response(question, results)
+                        else:
+                            result["natural_response"] = f"I found {result.get('result_count', 0)} results for your query."
+                    
+                    return result
+                elif result.get("success") or not result.get("requires_fallback", True):
+                    return result
+                logger.info("Tool-based query needs fallback, using VoteQuery2SQL")
+            except Exception as e:
+                logger.warning(f"Tool-based query failed, falling back to VoteQuery2SQL: {e}")
+        
         from .voting.vote_query2sql import VoteQuery2SQL
         logger.info("Voting data table - using VoteQuery2SQL directly")
         processor = VoteQuery2SQL()

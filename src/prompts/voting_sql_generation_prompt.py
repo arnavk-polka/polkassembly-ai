@@ -32,8 +32,8 @@ CORE SQL GUIDELINES:
 
 JOIN REQUIREMENTS (for voting power queries):
 - When querying voting power/balance, JOIN with conviction_vote table:
-  FROM {table_name} AS main
-  LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
+   FROM {table_name} AS main
+   LEFT JOIN conviction_vote AS cv ON main."parent_vote_id" = cv."id"
 - Use "cv.self_voting_power" for all voting power queries (replaces "balance").
 - Always use table aliases (main, cv) to avoid ambiguity.
 

@@ -66,7 +66,7 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
     Returns:
         dict: Response containing SQL query, results, and natural language answer
     """
-    if USE_TOOL_BASED_QUERIES and table != 'voting_data':
+    if USE_TOOL_BASED_QUERIES:
         logger.info("Using tool-based query processing")
         try:
             result = ask_question_tool_based(question, conversation_history, table, embedding_manager)
@@ -78,7 +78,7 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
     
     try:
         if table == 'voting_data':
-            print("Extracting from voting table")
+            logger.info("Falling back to VoteQuery2SQL for voting data")
             processor = VoteQuery2SQL()
         else:
             processor = Query2SQL(embedding_manager=embedding_manager)

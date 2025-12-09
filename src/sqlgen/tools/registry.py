@@ -68,7 +68,7 @@ class ToolRegistry:
         return "\n".join(lines)
 
 
-def get_tool_registry(db_config: Dict = None, table_name: str = "governance_data", timeout: float = 30.0) -> ToolRegistry:
+def get_tool_registry(db_config: Dict = None, table_name: str = "governance_data", timeout: float = 30.0, table_type: str = "governance_data") -> ToolRegistry:
     global _registry_instance
     
     if _registry_instance is None:
@@ -125,12 +125,12 @@ def get_tool_registry(db_config: Dict = None, table_name: str = "governance_data
                 GetTreasurySummary(db_config, table_name, timeout),
                 ListTreasuryProposals(db_config, table_name, timeout),
                 GetTreasuryProposalById(db_config, table_name, timeout),
-                GetVoteStats(db_config, "voting_data", timeout),
-                GetTopVoters(db_config, "voting_data", timeout),
-                GetVoterHistory(db_config, "voting_data", timeout),
-                GetDelegatedVotes(db_config, "voting_data", timeout),
-                GetVotesByConviction(db_config, "voting_data", timeout),
-                CountVoters(db_config, "voting_data", timeout),
+                GetVoteStats(db_config, table_name, timeout),
+                GetTopVoters(db_config, table_name, timeout),
+                GetVoterHistory(db_config, table_name, timeout),
+                GetDelegatedVotes(db_config, table_name, timeout),
+                GetVotesByConviction(db_config, table_name, timeout),
+                CountVoters(db_config, table_name, timeout),
                 ListBounties(db_config, table_name, timeout),
                 GetBountyById(db_config, table_name, timeout),
                 ListChildBounties(db_config, table_name, timeout),
