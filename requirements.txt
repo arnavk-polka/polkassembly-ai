@@ -59,5 +59,8 @@ idna==3.6
 # Google Gemini SDK
 google-genai==1.28.0
 
-# AWS SDK (for guardrail)
-boto3==1.35.0
+# Google API Client (for guardrails)
+google-api-python-client==2.154.0
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0

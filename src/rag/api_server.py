@@ -70,8 +70,8 @@ async def lifespan(app: FastAPI):
         Config.validate_config()
         logger.info("Configuration validated")
         
-        # Content guardrails now handled by Bedrock guardrails in the query endpoint
-        logger.info("Bedrock guardrails will be used for content moderation")
+        # Content guardrails now handled by Google Checks Guardrails API in the query endpoint
+        logger.info("Google Checks Guardrails API will be used for content moderation")
         
         # Initialize static embedding manager
         logger.info("Initializing static embedding manager...")
@@ -270,7 +270,7 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 detail="Rate limit exceeded. Please try again later."
             )
         
-        # 🛡️ Bedrock Guardrail content moderation
+        # 🛡️ Google Checks Guardrails API content moderation
         logger.info(f"Processing query from user {request.user_id}: '{request.question[:50]}...' (remaining: {remaining_requests})")
         
         guardrail_result = await check_with_guardrail_async(request.question)
@@ -306,7 +306,10 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 search_method="guardrail_blocked"
             )
         elif guardrail_result["status"] == "error":
-            logger.error(f"Guardrail error for user {request.user_id}: {guardrail_result['reason']}")
+            if guardrail_result.get("quota_exceeded"):
+                logger.warning(f"Guardrail quota exceeded for user {request.user_id}. Continuing without guardrail check. Please request quota increase from Google Cloud.")
+            else:
+                logger.error(f"Guardrail error for user {request.user_id}: {guardrail_result['reason']}")
             # Continue processing if guardrail fails - don't block legitimate queries due to technical issues
         
     

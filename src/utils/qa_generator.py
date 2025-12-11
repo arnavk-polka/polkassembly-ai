@@ -13,7 +13,7 @@ import sys
 from datetime import datetime, timedelta
 
 from .mem0_memory import get_memory_manager, add_user_query, add_assistant_response
-# Content guardrails now handled by Bedrock guardrails in the API endpoint
+# Content guardrails now handled by Google Checks Guardrails API in the API endpoint
 from .slack_bot import SlackBot
 
 # Load environment variables
@@ -75,8 +75,8 @@ class QAGenerator:
             logger.info("Continuing without Gemini client (OpenAI only mode)")
             self.gemini_client = None
         
-        # Content guardrails now handled by Bedrock guardrails in the API endpoint
-        logger.info("Content moderation will be handled by Bedrock guardrails")
+        # Content guardrails now handled by Google Checks Guardrails API in the API endpoint
+        logger.info("Content moderation will be handled by Google Checks Guardrails API")
         
         # Initialize memory manager
         self.memory_manager = get_memory_manager() if enable_memory else None
@@ -1354,7 +1354,7 @@ Please follow these guidelines:
             if len(sources) >= 2 and any(s['url'] for s in sources):
                 break
         
-        # Return sources without additional filtering (Bedrock guardrails handle content moderation)
+        # Return sources without additional filtering (Google Checks Guardrails API handles content moderation)
         return sources
     
     def _estimate_confidence(self, chunks: List[Dict[str, Any]]) -> float:
