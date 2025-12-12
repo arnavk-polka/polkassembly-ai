@@ -36,11 +36,11 @@ class CSVCombiner:
                 logger.info(f"Analyzing {csv_file.name}")
                 
                 # Read just the header to get column info
-                df_sample = pd.read_csv(csv_file, nrows=0)
+                df_sample = pd.read_csv(csv_file, nrows=0, low_memory=False)
                 columns = list(df_sample.columns)
                 
                 # Get basic file info
-                df_full = pd.read_csv(csv_file)
+                df_full = pd.read_csv(csv_file, low_memory=False)
                 
                 file_info[csv_file.name] = {
                     'path': csv_file,
@@ -129,7 +129,7 @@ class CSVCombiner:
                 logger.info(f"Processing {filename} ({info['row_count']} rows)")
                 
                 # Read the CSV file
-                df = pd.read_csv(info['path'])
+                df = pd.read_csv(info['path'], low_memory=False)
                 
                 # Add source tracking columns
                 df = self.add_source_tracking_columns(df, filename)
@@ -138,9 +138,10 @@ class CSVCombiner:
                 current_columns = list(df.columns)
                 missing_columns = [col for col in all_columns if col not in current_columns and not col.startswith('source_')]
                 
-                # Add missing columns with NaN values
-                for col in missing_columns:
-                    df[col] = pd.NA
+                # Add missing columns with NaN values (batch operation to avoid fragmentation)
+                if missing_columns:
+                    missing_df = pd.DataFrame({col: pd.NA for col in missing_columns}, index=df.index)
+                    df = pd.concat([df, missing_df], axis=1)
                 
                 # Reorder columns to match the master column order
                 source_cols = ['source_file', 'source_network', 'source_proposal_type', 'source_row_id']
@@ -165,7 +166,10 @@ class CSVCombiner:
         
         # Combine all DataFrames
         logger.info("Concatenating all DataFrames...")
-        combined_df = pd.concat(combined_dfs, ignore_index=True, sort=False)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=FutureWarning)
+            combined_df = pd.concat(combined_dfs, ignore_index=True, sort=False)
         
         logger.info("Creating row_index column...")
         # Per user request, create a row_index from specific columns with an underscore separator.
@@ -180,7 +184,9 @@ class CSVCombiner:
                 combined_df[col] = ''
 
         # Create the new column by joining the specified columns with the separator
-        combined_df["row_index"] = combined_df[cols_to_concat].astype(str).agg(separator.join, axis=1)
+        # Use apply with a lambda to avoid fragmentation warnings
+        combined_df = combined_df.copy()
+        combined_df["row_index"] = combined_df[cols_to_concat].astype(str).apply(lambda x: separator.join(x), axis=1)
         
         logger.info(f"Combined DataFrame created: {len(combined_df)} rows, {len(combined_df.columns)} columns")
         return combined_df

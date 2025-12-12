@@ -114,10 +114,10 @@ class PostgresInserter:
         logger.info(f"Analyzing CSV structure: {csv_path.name}")
         
         # Read a sample to understand structure
-        sample_df = pd.read_csv(csv_path, nrows=1000)
+        sample_df = pd.read_csv(csv_path, nrows=1000, low_memory=False)
         
         # Get full column info
-        df_info = pd.read_csv(csv_path, nrows=0)  # Just headers
+        df_info = pd.read_csv(csv_path, nrows=0, low_memory=False)  # Just headers
         columns = list(df_info.columns)
         
         # Analyze data types
@@ -140,7 +140,7 @@ class PostgresInserter:
             }
         
         # Get total row count
-        total_rows = len(pd.read_csv(csv_path))
+        total_rows = len(pd.read_csv(csv_path, low_memory=False))
         
         analysis = {
             'total_rows': total_rows,
@@ -204,11 +204,33 @@ class PostgresInserter:
         
         # Check pandas dtype
         if pd.api.types.is_integer_dtype(series):
+            # Check for hash-like strings that might have been misclassified
+            # Even if dtype is integer, check actual values for strings
+            non_null_data = series.dropna()
+            if len(non_null_data) > 0:
+                sample_values = non_null_data.head(100)
+                for val in sample_values:
+                    # Convert to string to check if it looks like a hash
+                    val_str = str(val)
+                    if len(val_str) > 20 or (not val_str.replace('.', '').replace('-', '').isdigit() and not isinstance(val, (int, float))):
+                        logger.info(f"Column {column_name} contains non-numeric values, using TEXT instead of NUMERIC")
+                        return 'TEXT'
             # Use NUMERIC for all integer types to avoid any range issues
             logger.info(f"Column {column_name} detected as integer, using NUMERIC for safety")
             return 'NUMERIC'
         
         elif pd.api.types.is_float_dtype(series):
+            # Check for hash-like strings that might have been misclassified
+            non_null_data = series.dropna()
+            if len(non_null_data) > 0:
+                sample_values = non_null_data.head(100)
+                for val in sample_values:
+                    # Check if value is actually a string (shouldn't happen with float dtype, but check anyway)
+                    if isinstance(val, str):
+                        val_str = val.strip()
+                        if len(val_str) > 20 or val_str.startswith('0x') or not val_str.replace('.', '').replace('-', '').replace('e', '').replace('E', '').replace('+', '').isdigit():
+                            logger.info(f"Column {column_name} contains hash-like strings, using TEXT instead of DOUBLE PRECISION")
+                            return 'TEXT'
             return 'DOUBLE PRECISION'
         
         elif pd.api.types.is_bool_dtype(series):
@@ -361,7 +383,7 @@ CREATE TABLE {self.table_name} (
                     total_inserted = 0
                     chunk_size = self.batch_size
                     
-                    for chunk_df in pd.read_csv(csv_path, chunksize=chunk_size):
+                    for chunk_df in pd.read_csv(csv_path, chunksize=chunk_size, low_memory=False):
                         # Clean and prepare data
                         chunk_data = self._prepare_data_for_insert(chunk_df, analysis)
                         
@@ -512,8 +534,13 @@ CREATE TABLE {self.table_name} (
                     value = value.strip()
                     if value == '':
                         return None
-                    if value.startswith('0x') or not value.replace('.', '').replace('-', '').replace('e', '').replace('E', '').replace('+', '').isdigit():
-                        logger.warning(f"Attempted to convert non-numeric value '{value[:20]}...' to float, returning None")
+                    # Check for hash-like strings (alphanumeric strings longer than typical numbers)
+                    if value.startswith('0x') or (len(value) > 20 and not value.replace('.', '').replace('-', '').replace('e', '').replace('E', '').replace('+', '').isdigit()):
+                        return None
+                    # More robust check: try to see if it's actually numeric
+                    try:
+                        float(value)
+                    except ValueError:
                         return None
                 
                 float_val = float(value)

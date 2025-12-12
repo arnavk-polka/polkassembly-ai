@@ -46,7 +46,7 @@ column_list = ['source_file', 'source_network', 'source_proposal_type',
        'tags_1_value', 'tags_2_lastusedat', 'tags_2_network', 'tags_2_value',
        'title', 'topic', 'updatedat', 'userid', 'onchaininfo_beneficiaries_0_assetid', 'row_index']
 
-governance_data_486 = pd.read_csv(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/one_table/combined_governance_data.csv")
+governance_data_486 = pd.read_csv(str(os.getenv("BASE_PATH")) + "/onchain_data/onchain_first_pull/one_table/combined_governance_data.csv", low_memory=False)
 
 # Some monthly exports drop certain columns; keep only those that actually exist.
 available_columns = [col for col in column_list if col in governance_data_486.columns]

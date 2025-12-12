@@ -12,7 +12,7 @@ CLEAN_DIRS=(
   "/home/ubuntu/pa-ai/polkassembly-ai/data/onchain_data"
   "/home/ubuntu/pa-ai/polkassembly-ai/onchain_data/onchain_first_pull/all_csv"
   "/home/ubuntu/pa-ai/polkassembly-ai/onchain_data/onchain_first_pull/one_table"
-  "/home/ubuntu/pa-ai/polkassembly-ai/onchain_data/onchain_first_pull/one_table/filter_table"
+  "/home/ubuntu/pa-ai/polkassembly-ai/onchain_data/onchain_first_pull/one_table/filter_data"
 )
 
 # Python scripts to run (in exact order)
