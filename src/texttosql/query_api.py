@@ -73,11 +73,22 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
             processor = Query2SQL(embedding_manager=embedding_manager)
         
         # Process the question with conversation history
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SQL] Processing query for table {table or 'governance_data'}: {question[:100]}")
         result = processor.process_query(question, conversation_history)
+        logger.info(f"[SQL] Query completed. Success: {result.get('success', False)}, Result count: {result.get('result_count', 0)}")
         
         return result
         
     except Exception as e:
+        # Log the error with full traceback
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"[SQL] Error processing query: {str(e)}")
+        logger.error(f"[SQL] Traceback: {traceback.format_exc()}")
+        
         # Send error notification to Slack
         send_error_to_slack(question, str(e), f"Query2SQL-{table or 'governance'}")
         
@@ -92,7 +103,8 @@ def ask_question(question: str, conversation_history: Optional[List[Dict[str, An
             "error": str(e),
             "table": table or "governance_data",
             "validator_verdict": None,
-            "validator_reason": None
+            "validator_reason": None,
+            "requires_fallback": True
         }
 
 def main():

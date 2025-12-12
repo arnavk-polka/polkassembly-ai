@@ -808,9 +808,11 @@ class Query2SQL:
         all_results = []
         
         try:
+            logger.info(f"[Query2SQL] Attempting database connection...")
             with self.get_connection() as conn:
+                logger.info(f"[Query2SQL] Database connection successful")
                 for i, sql_query in enumerate(sql_queries):
-                    logger.info(f"Executing query {i+1}/{len(sql_queries)}: {sql_query}")
+                    logger.info(f"[Query2SQL] Executing query {i+1}/{len(sql_queries)}: {sql_query[:200]}...")
                     
                     # Use pandas for easier data handling
                     df = pd.read_sql_query(sql_query, conn)
@@ -820,13 +822,15 @@ class Query2SQL:
                     columns = df.columns.tolist()
                     
                     all_results.append((results, columns))
-                    logger.info(f"Query {i+1} executed successfully. Retrieved {len(results)} rows")
+                    logger.info(f"[Query2SQL] Query {i+1} executed successfully. Retrieved {len(results)} rows")
                 
                 return all_results
                 
         except Exception as e:
-            logger.error(f"Error executing SQL queries: {e}")
-            logger.error(f"Queries: {sql_queries}")
+            import traceback
+            logger.error(f"[Query2SQL] Error executing SQL queries: {e}")
+            logger.error(f"[Query2SQL] Full traceback: {traceback.format_exc()}")
+            logger.error(f"[Query2SQL] Queries that failed: {sql_queries}")
             raise
     
     def execute_sql_query(self, sql_query: str) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -1348,13 +1352,19 @@ Return ONLY the JSON object, no other text."""
     def process_query(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None, table: Optional[str] = None) -> Dict[str, Any]:
         """Main method to process a natural language query end-to-end with error correction"""
         try:
-            logger.info(f"Processing query: {natural_query}")
+            logger.info(f"[Query2SQL] Processing query: {natural_query}")
+            logger.info(f"[Query2SQL] Database config: host={self.db_config.get('host')}, db={self.db_config.get('database')}")
             
             # Step 1: Generate SQL queries first (without executing)
+            logger.info(f"[Query2SQL] Step 1: Generating SQL queries...")
             sql_queries = self._generate_sql_queries_only(natural_query, conversation_history)
+            logger.info(f"[Query2SQL] Generated {len(sql_queries)} SQL query/queries")
+            for i, q in enumerate(sql_queries):
+                logger.info(f"[Query2SQL] SQL {i+1}: {q[:200]}...")
             
             # Step 1.5: Check SQL precision before execution
             # Step 2: Execute SQL queries
+            logger.info(f"[Query2SQL] Step 2: Executing SQL queries...")
             all_results = self.execute_sql_queries(sql_queries)
             
             # Step 2.5: Check data presence after execution
@@ -1453,7 +1463,9 @@ Return ONLY the JSON object, no other text."""
                 }
             
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            import traceback
+            logger.error(f"[Query2SQL] Error processing query: {e}")
+            logger.error(f"[Query2SQL] Full traceback: {traceback.format_exc()}")
             return {
                 "original_query": natural_query,
                 "sql_query": None,
@@ -1465,7 +1477,8 @@ Return ONLY the JSON object, no other text."""
                 "success": False,
                 "error": str(e),
                 "validator_verdict": None,
-                "validator_reason": None
+                "validator_reason": None,
+                "requires_fallback": True
             }
 
     def _extract_sql_intent(self, natural_query: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
