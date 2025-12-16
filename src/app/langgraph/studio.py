@@ -28,13 +28,12 @@ def _get_static_embedding_manager():
     global _cached_static_manager
     if _cached_static_manager is None:
         try:
-            from src.core.embeddings import EmbeddingManager
+            from src.core.static_provider import StaticProvider
             from src.core.config import Config
-            _cached_static_manager = EmbeddingManager(
+            _cached_static_manager = StaticProvider(
                 openai_api_key=Config.OPENAI_API_KEY,
-                embedding_model=Config.OPENAI_EMBEDDING_MODEL,
                 chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY,
-                collection_name=Config.CHROMA_COLLECTION_NAME
+                embedding_model=Config.OPENAI_EMBEDDING_MODEL,
             )
         except Exception as e:
             print(f"Warning: Could not init static embedding manager: {e}")

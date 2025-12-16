@@ -18,6 +18,29 @@ def extract_sources(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
             'source_type': metadata.get('source', 'unknown'),
             'similarity_score': chunk.get('similarity_score', 0.0)
         }
+
+        dkg_match = metadata.get('dkg_match')
+        chunk_id_from_meta = metadata.get('chunk_id')
+        chunk_hash_from_meta = metadata.get('chunk_hash')
+        
+        logger.debug(f"extract_sources: chunk metadata keys={list(metadata.keys())}, dkg_match={dkg_match}, chunk_id={chunk_id_from_meta}")
+        
+        if dkg_match and isinstance(dkg_match, dict):
+            asset_ual = dkg_match.get('asset_ual')
+            chunk_id = dkg_match.get('chunk_id')
+            chunk_hash = dkg_match.get('chunk_hash')
+            if asset_ual:
+                source['dkg_asset_ual'] = asset_ual
+                logger.info(f"extract_sources: Found dkg_asset_ual={asset_ual} for chunk_id={chunk_id}")
+            if chunk_id:
+                source['chunk_id'] = chunk_id
+            if chunk_hash:
+                source['chunk_hash'] = chunk_hash
+        elif chunk_id_from_meta:
+            source['chunk_id'] = chunk_id_from_meta
+            if chunk_hash_from_meta:
+                source['chunk_hash'] = chunk_hash_from_meta
+            logger.debug(f"extract_sources: Using chunk_id from metadata (no dkg_match): {chunk_id_from_meta}")
         
         if source['url'] and source['url'] not in seen_urls:
             sources.append(source)

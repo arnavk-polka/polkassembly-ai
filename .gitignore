@@ -8,6 +8,7 @@
 
 # ChromaDB database files
 chroma_db/
+testscripts/
 *.sqlite3
 *.db
 
@@ -16,13 +17,13 @@ chroma_db/
 
 #files
 *.zip
-*.csv
 
 # Data files and directories
 data/
 !src/data/
 !data/structured_data/src
 *.json
+*.jsonl
 *.txt
 !requirements.txt
 *.csv

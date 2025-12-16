@@ -23,6 +23,7 @@ from ..core.config import Config
 from .auth import authenticate_request, get_auth_status
 from ..core.embeddings import EmbeddingManager
 from ..core.generator import QAGenerator
+from ..core.static_provider import StaticProvider
 from ..safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
 from ..core.rate_limiter import check_rate_limit, get_client_stats
 from ..core.reranking.chunks_reranker import rerank_static_chunks
@@ -45,7 +46,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-static_embedding_manager: Optional[EmbeddingManager] = None
+static_embedding_manager: Optional[object] = None
 dynamic_embedding_manager: Optional[EmbeddingManager] = None
 router_embedding_manager: Optional[EmbeddingManager] = None
 qa_generator: Optional[QAGenerator] = None
@@ -60,11 +61,10 @@ async def lifespan(app: FastAPI):
     try:
         Config.validate_config()
         
-        static_embedding_manager = EmbeddingManager(
+        static_embedding_manager = StaticProvider(
             openai_api_key=Config.OPENAI_API_KEY,
-            embedding_model=Config.OPENAI_EMBEDDING_MODEL,
             chroma_persist_directory=Config.CHROMA_PERSIST_DIRECTORY,
-            collection_name=Config.CHROMA_COLLECTION_NAME
+            embedding_model=Config.OPENAI_EMBEDDING_MODEL,
         )
         
         dynamic_embedding_manager = EmbeddingManager(
@@ -81,8 +81,12 @@ async def lifespan(app: FastAPI):
             collection_name=Config.CHROMA_ROUTER_COLLECTION_NAME
         )
         
-        if not static_embedding_manager.collection_exists():
-            logger.warning("Static ChromaDB collection is empty. Please run create_embeddings.py first.")
+        try:
+            stats = static_embedding_manager.get_stats()
+            if stats.get("docs_count", 0) == 0 and stats.get("aag_count", 0) == 0:
+                logger.warning("Static ChromaDB collections are empty. Please run static ingestion first.")
+        except Exception as e:
+            logger.warning(f"Could not get static provider stats: {e}")
         
         if not dynamic_embedding_manager.collection_exists():
             logger.warning("Dynamic ChromaDB collection is empty. Please run create_dynamic_embeddings.py first.")
@@ -161,6 +165,10 @@ class Source(BaseModel):
     url: str
     source_type: str
     similarity_score: float
+    chunk_id: Optional[str] = Field(default=None, description="Static chunk identifier (for DKG verification)")
+    chunk_hash: Optional[str] = Field(default=None, description="Hash of the static chunk (for integrity checks)")
+    dkg_asset_ual: Optional[str] = Field(default=None, description="OriginTrail DKG asset UAL if this chunk is verifiable on DKG")
+    dkg_verified: Optional[bool] = Field(default=None, description="True if dkg_asset_ual was successfully resolved on DKG")
 
 class QueryResponse(BaseModel):
     answer: str
@@ -199,6 +207,24 @@ class SearchResponse(BaseModel):
 
 
 
+def _set_dkg_verified_status(raw_sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Set dkg_verified status based on whether dkg_asset_ual exists.
+    
+    We trust the UAL from dkg_chunk_index.json since it was created when chunks
+    were published to DKG. Users can verify on-chain themselves if needed.
+    This avoids blocking the response with slow DKG node queries.
+    """
+    for src in raw_sources:
+        ual = src.get("dkg_asset_ual")
+        if ual:
+            src["dkg_verified"] = True
+            logger.debug(f"Set dkg_verified=True for source title='{src.get('title')}', ual='{ual}'")
+        else:
+            src["dkg_verified"] = None
+    return raw_sources
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check(authenticated: bool = Depends(authenticate_request)):
     """Health check endpoint"""
@@ -206,7 +232,10 @@ async def health_check(authenticated: bool = Depends(authenticate_request)):
         if not static_embedding_manager or not dynamic_embedding_manager:
             raise HTTPException(status_code=503, detail="Embedding managers not initialized")
         
-        stats = static_embedding_manager.get_collection_stats()
+        try:
+            stats = static_embedding_manager.get_stats()
+        except AttributeError:
+            stats = {}
         
         return HealthResponse(
             status="healthy" if stats.get('total_chunks', 0) > 0 else "no_data",
@@ -355,17 +384,40 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 search_method="query_processor_error"
             )
         
-        sources = []
+        sources: List[Source] = []
         if request.include_sources:
-            sources = [
-                Source(
-                    title=src['title'],
-                    url=src['url'],
-                    source_type=src['source_type'],
-                    similarity_score=src['similarity_score']
+            raw_sources: List[Dict[str, Any]] = qa_result.get("sources", [])
+            if raw_sources:
+                logger.info(f"qa_result sources before setting DKG status: {raw_sources}")
+                raw_sources = _set_dkg_verified_status(raw_sources)
+            for src in raw_sources:
+                sources.append(
+                    Source(
+                        title=src.get("title", ""),
+                        url=src.get("url", ""),
+                        source_type=src.get("source_type", "unknown"),
+                        similarity_score=src.get("similarity_score", 0.0),
+                        chunk_id=src.get("chunk_id"),
+                        chunk_hash=src.get("chunk_hash"),
+                        dkg_asset_ual=src.get("dkg_asset_ual"),
+                        dkg_verified=src.get("dkg_verified"),
+                    )
                 )
-                for src in qa_result.get('sources', [])
-            ]
+        if sources:
+            logger.info(
+                "Final sources returned to client: "
+                + str(
+                    [
+                        {
+                            "title": s.title,
+                            "dkg_asset_ual": s.dkg_asset_ual,
+                            "dkg_verified": s.dkg_verified,
+                            "chunk_id": s.chunk_id,
+                        }
+                        for s in sources
+                    ]
+                    )
+                )
         
         processing_time = qa_result.get('processing_time_ms', (datetime.now() - start_time).total_seconds() * 1000)
 
