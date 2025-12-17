@@ -168,9 +168,10 @@ class QAGenerator:
             if route_result_data_source == 'ONCHAIN':
                 return handle_dynamic_route(self, analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
             
+            hybrid_sql_metadata = None
             if route_result_data_source == 'HYBRID':
                 logger.info("Hybrid route: Entering hybrid processing block")
-                analyzed_query = handle_hybrid_route(self, analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
+                analyzed_query, hybrid_sql_metadata = handle_hybrid_route(self, analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
             
             try:
                 context = self.create_context_from_chunks(chunks, max_context_length=8000)
@@ -394,6 +395,15 @@ class QAGenerator:
                 'chunks_used': len(chunks),
                 'search_method': search_method
             }
+            
+            if route_result_data_source == 'HYBRID' and hybrid_sql_metadata:
+                result.update({
+                    'result_count': hybrid_sql_metadata.get('result_count', 0),
+                    'success': hybrid_sql_metadata.get('success', False),
+                    'sql_query': hybrid_sql_metadata.get('sql_query'),
+                    'sql_queries': hybrid_sql_metadata.get('sql_queries', [])
+                })
+                logger.info(f"Hybrid route: Added SQL metadata to result - result_count={result.get('result_count', 0)}, success={result.get('success', False)}")
             
             logger.info(f"Generated answer for query: '{query[:50]}...' using {len(chunks)} chunks")
             return result

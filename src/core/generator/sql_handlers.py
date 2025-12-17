@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +128,12 @@ def handle_dynamic_route(self, analyzed_query: str, conversation_history: Option
             'success': False
         }
 
-def handle_hybrid_route(self, analyzed_query: str, conversation_history: Optional[List[Dict[str, Any]]], route_result_table: Optional[str], dynamic_embedding_manager) -> str:
+def handle_hybrid_route(self, analyzed_query: str, conversation_history: Optional[List[Dict[str, Any]]], route_result_table: Optional[str], dynamic_embedding_manager) -> Tuple[str, Dict[str, Any]]:
     from ...sqlgen.query_api import ask_question
     
     dynamic_answer = None
     dynamic_data_available = False
+    sql_result = None
     try:
         logger.info(f"Hybrid route: Executing SQL query for dynamic data. Query: {analyzed_query[:100]}, Table: {route_result_table}")
         sql_result = ask_question(analyzed_query, conversation_history, route_result_table, dynamic_embedding_manager)
@@ -142,14 +143,24 @@ def handle_hybrid_route(self, analyzed_query: str, conversation_history: Optiona
     except Exception as e:
         logger.error(f"Error in hybrid SQL query processing: {e}", exc_info=True)
         dynamic_data_available = False
+        sql_result = None
+    
+    sql_metadata = {
+        'result_count': sql_result.get('result_count', 0) if sql_result else 0,
+        'success': sql_result.get('success', False) if sql_result else False,
+        'sql_query': sql_result.get('sql_query') if sql_result else None,
+        'sql_queries': sql_result.get('sql_queries', []) if sql_result else [],
+        'dynamic_data_available': dynamic_data_available
+    }
+    
+    if not sql_metadata['sql_query'] and sql_metadata['sql_queries']:
+        sql_metadata['sql_query'] = sql_metadata['sql_queries'][0] if sql_metadata['sql_queries'] else None
     
     if dynamic_answer and dynamic_data_available:
         updated_query = f"{analyzed_query}\n\nIMPORTANT: The user also requested specific data. Here is the dynamic data from the database:\n{dynamic_answer}\n\nPlease incorporate this data into your response along with the static context."
         logger.info(f"Hybrid route: Added dynamic data to query context. Dynamic answer preview: {dynamic_answer[:200]}")
-        return updated_query
-    elif not dynamic_data_available:
+        return updated_query, sql_metadata
+    else:
         logger.warning("Hybrid route: Dynamic data not available, proceeding with static only")
-        return analyzed_query
-    
-    return analyzed_query
+        return analyzed_query, sql_metadata
 
