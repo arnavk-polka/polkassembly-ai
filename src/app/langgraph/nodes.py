@@ -18,7 +18,7 @@ from ..handlers.route_handlers import (
     handle_generic_route
 )
 from ...core.routing import get_router
-from ...safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
+from ...safety.model_armor import check_with_guardrail_async, generate_user_friendly_block_message
 from ...core.errors import is_insufficient_quota_error, get_quota_error_message
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def _ensure_dependencies(state: KlaraState) -> tuple:
 
 
 async def safety_node(state: KlaraState) -> Dict[str, Any]:
-    """Safety check node - guardrail validation"""
+    """Safety check node - Model Armor validation"""
     query = state.get("query", "")
     if not query and state.get("messages"):
         messages = state.get("messages", [])
@@ -81,15 +81,15 @@ async def safety_node(state: KlaraState) -> Dict[str, Any]:
     })
     
     try:
-        guardrail_result = await check_with_guardrail_async(query)
+        model_armor_result = await check_with_guardrail_async(query)
         
-        is_blocked = guardrail_result.get("status") == "blocked"
+        is_blocked = model_armor_result.get("status") in ["blocked", "sanitized"]
         block_message = None
         
         if is_blocked:
-            violation_details = guardrail_result.get('violation_details', {})
-            reason = guardrail_result.get('reason', 'Content policy violation')
-            logger.warning(f"Query blocked by guardrail for user {user_id}: {reason}")
+            violation_details = model_armor_result.get('violation_details', {})
+            reason = model_armor_result.get('reason', 'Content policy violation')
+            logger.warning(f"Query blocked by Model Armor for user {user_id}: {reason}")
             
             try:
                 block_message = await generate_user_friendly_block_message(violation_details, query)
@@ -99,12 +99,12 @@ async def safety_node(state: KlaraState) -> Dict[str, Any]:
         
         log_step("langgraph_safety_node_complete", {
             "is_blocked": is_blocked,
-            "status": guardrail_result.get("status")
+            "status": model_armor_result.get("status")
         })
         
         return {
             **init_updates,
-            "guardrail_result": guardrail_result,
+            "guardrail_result": model_armor_result,
             "is_blocked": is_blocked,
             "block_message": block_message
         }

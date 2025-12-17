@@ -24,7 +24,7 @@ from .auth import authenticate_request, get_auth_status
 from ..core.embeddings import EmbeddingManager
 from ..core.generator import QAGenerator
 from ..core.static_provider import StaticProvider
-from ..safety.bedrock_guardrail import check_with_guardrail_async, generate_user_friendly_block_message
+from ..safety.model_armor import check_with_guardrail_async, generate_user_friendly_block_message
 from ..core.rate_limiter import check_rate_limit, get_client_stats
 from ..core.reranking.chunks_reranker import rerank_static_chunks
 from ..ops.monitoring import (
@@ -248,7 +248,7 @@ async def health_check(authenticated: bool = Depends(authenticate_request)):
 
 @app.post("/query", response_model=QueryResponse)
 async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(authenticate_request)):
-    """Main chatbot query endpoint with enhanced guardrails and rate limiting"""
+    """Main chatbot query endpoint with Model Armor safety checks and rate limiting"""
     start_time = datetime.now()
     
     try:
@@ -268,12 +268,12 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 detail="Rate limit exceeded. Please try again later."
             )
         
-        guardrail_result = await check_with_guardrail_async(request.question)
+        model_armor_result = await check_with_guardrail_async(request.question)
         
-        if guardrail_result["status"] == "blocked":
-            violation_details = guardrail_result.get('violation_details', {})
-            reason = guardrail_result.get('reason', 'Content policy violation')
-            logger.warning(f"Query blocked by guardrail for user {request.user_id} from IP {request.client_ip}: {reason}")
+        if model_armor_result["status"] in ["blocked", "sanitized"]:
+            violation_details = model_armor_result.get('violation_details', {})
+            reason = model_armor_result.get('reason', 'Content policy violation')
+            logger.warning(f"Query blocked by Model Armor for user {request.user_id} from IP {request.client_ip}: {reason}")
             
             try:
                 answer = await generate_user_friendly_block_message(violation_details, request.question)
@@ -292,14 +292,14 @@ async def query_chatbot(request: QueryRequest, authenticated: bool = Depends(aut
                 remaining_requests=remaining_requests,
                 confidence=0.0,
                 context_used=False,
-                model_used="guardrail",
+                model_used="model_armor",
                 chunks_used=0,
                 processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
                 timestamp=datetime.now().isoformat(),
-                search_method="guardrail_blocked"
+                search_method="model_armor_blocked"
             )
-        elif guardrail_result["status"] == "error":
-            logger.error(f"Guardrail error for user {request.user_id}: {guardrail_result['reason']}")
+        elif model_armor_result["status"] == "error":
+            logger.error(f"Model Armor error for user {request.user_id}: {model_armor_result['reason']}")
     
         conversation_history_dicts = None
         if request.conversation_history:

@@ -148,11 +148,11 @@ def _create_block_response(state: KlaraState) -> Dict[str, Any]:
         ],
         "confidence": 0.0,
         "context_used": False,
-        "model_used": "guardrail",
+        "model_used": "model_armor",
         "chunks_used": 0,
         "processing_time_ms": processing_time,
         "timestamp": datetime.now().isoformat(),
-        "search_method": "guardrail_blocked",
+        "search_method": "model_armor_blocked",
         "route": "blocked",
         "route_confidence": 0.0
     }

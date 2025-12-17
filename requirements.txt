@@ -59,8 +59,12 @@ idna==3.6
 # Google Gemini SDK
 google-genai==1.28.0
 
-# AWS SDK (for guardrail)
-boto3==1.35.0
+# Google Cloud SDK (for Model Armor)
+google-auth==2.23.4
+google-auth-httplib2==0.1.1
+google-auth-oauthlib==1.1.0
+google-cloud-core==2.3.3
+google-cloud-modelarmor==1.0.0
 
 # LangGraph for orchestration
 langgraph>=0.2.0,<0.3.0

@@ -45,7 +45,7 @@ class QAGenerator:
             logger.info("Continuing without Gemini client (OpenAI only mode)")
             self.gemini_client = None
         
-        logger.info("Content moderation will be handled by Bedrock guardrails")
+        logger.info("Content moderation will be handled by Model Armor")
         
         try:
             self.slack_bot = SlackBot()
