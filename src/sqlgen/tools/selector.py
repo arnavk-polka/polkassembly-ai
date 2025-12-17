@@ -67,6 +67,15 @@ TREASURY SPENDING QUERIES:
 - Queries about "treasury spending", "total treasury", "treasury spend", "spending summary" → use "get_treasury_summary"
 - For queries with specific dates/months that tools don't support, still select the tool with closest time_window - the system will fall back to LLM SQL if needed
 
+COMMENT QUERIES:
+- Queries about "comments", "discussions", "replies", "threads" on proposals → use comment tools
+- "comments on proposal X", "what did people say about proposal Y" → use "get_comments_by_proposal"
+- "search comments", "find comments about X" → use "search_comments"
+- "comments by user X", "what did user Y comment" → use "list_comments_by_user"
+- "comment thread", "replies to comment" → use "get_comment_thread"
+- "comment statistics", "how many comments" → use "get_comments_stats"
+- "top commenters", "most active commenters" → use "get_top_commenters"
+
 OUTPUT FORMAT (JSON only, no explanation):
 {{
     "tool": "tool_name",

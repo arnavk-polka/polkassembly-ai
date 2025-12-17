@@ -110,6 +110,15 @@ def get_tool_registry(db_config: Dict = None, table_name: str = "governance_data
                 GetProposalsByTrack,
                 GetNetworkStats
             )
+            from .comments import (
+                GetCommentsByProposal,
+                GetCommentById,
+                ListCommentsByUser,
+                SearchComments,
+                GetCommentThread,
+                GetCommentsStats,
+                GetTopCommenters
+            )
             
             tools = [
                 GetProposalById(db_config, table_name, timeout),
@@ -137,6 +146,13 @@ def get_tool_registry(db_config: Dict = None, table_name: str = "governance_data
                 CountProposals(db_config, table_name, timeout),
                 GetProposalsByTrack(db_config, table_name, timeout),
                 GetNetworkStats(db_config, table_name, timeout),
+                GetCommentsByProposal(db_config, table_name, timeout),
+                GetCommentById(db_config, table_name, timeout),
+                ListCommentsByUser(db_config, table_name, timeout),
+                SearchComments(db_config, table_name, timeout),
+                GetCommentThread(db_config, table_name, timeout),
+                GetCommentsStats(db_config, table_name, timeout),
+                GetTopCommenters(db_config, table_name, timeout),
             ]
             
             for tool in tools:

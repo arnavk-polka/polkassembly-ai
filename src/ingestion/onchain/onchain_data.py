@@ -133,6 +133,55 @@ class PolkassemblyDataFetcher:
 
         return all_posts[:max_items]
 
+    def fetch_comments(self, limit: int = 50, offset: int = 1) -> Dict[str, Any]:
+        """Fetch comments from Polkassembly API"""
+        url = f"{self.base_url}/comments"
+
+        params = {
+            'limit': limit,
+            'page': offset
+        }
+
+        try:
+            response = requests.get(url, params=params, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching comments: {e}")
+            return {}
+
+    def fetch_all_comments(self, max_items: Optional[int] = 1000) -> List[Dict]:
+        """Fetch all comments with pagination"""
+        all_comments = []
+        offset = 1
+        limit = 50
+
+        logger.info(f"Fetching comments for {self.network}...")
+
+        while max_items is None or len(all_comments) < max_items:
+            response_data = self.fetch_comments(limit, offset)
+
+            if not response_data or 'items' not in response_data:
+                break
+
+            comments = response_data['items']
+            if not comments:
+                break
+
+            total_count = response_data.get('totalCount')
+            if total_count and max_items is not None:
+                max_items = min(max_items, total_count)
+
+            all_comments.extend(comments)
+            offset += 1
+            time.sleep(0.1)
+
+            logger.info(f"Fetched {len(all_comments)} comments so far...")
+
+        if max_items is not None:
+            return all_comments[:max_items]
+        return all_comments
+
     def save_to_file(self, data: List[Dict], filename: str):
         """Save data to JSON file in the data directory"""
         filepath = os.path.join(self.data_dir, filename)

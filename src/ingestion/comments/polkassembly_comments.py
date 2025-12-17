@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 
 import psycopg2
 from psycopg2.extras import execute_values, Json
+from psycopg2 import errors
 
 from src.ingestion.onchain.onchain_data import PolkassemblyDataFetcher, _resolve_data_dir
 
@@ -71,37 +72,24 @@ def _insert_comments(conn, records: List[tuple]):
         source_file, fetched_at, raw
     )
     VALUES %s
-    ON CONFLICT (id) DO UPDATE SET
-        network = EXCLUDED.network,
-        proposal_type = EXCLUDED.proposal_type,
-        index_or_hash = EXCLUDED.index_or_hash,
-        parent_comment_id = EXCLUDED.parent_comment_id,
-        user_id = EXCLUDED.user_id,
-        content = EXCLUDED.content,
-        created_at = EXCLUDED.created_at,
-        updated_at = EXCLUDED.updated_at,
-        is_deleted = EXCLUDED.is_deleted,
-        data_source = EXCLUDED.data_source,
-        author_address = EXCLUDED.author_address,
-        ai_sentiment = EXCLUDED.ai_sentiment,
-        history = EXCLUDED.history,
-        public_user = EXCLUDED.public_user,
-        children = EXCLUDED.children,
-        reactions = EXCLUDED.reactions,
-        source_file = EXCLUDED.source_file,
-        fetched_at = EXCLUDED.fetched_at,
-        raw = EXCLUDED.raw;
     """
 
     with conn.cursor() as cur:
-        execute_values(cur, insert_sql, records, page_size=1000)
-    conn.commit()
+        try:
+            execute_values(cur, insert_sql, records, page_size=1000)
+            conn.commit()
+        except errors.UniqueViolation:
+            conn.rollback()
+            logger.warning(f"Skipping duplicate records in batch")
+        except errors.IntegrityError as e:
+            conn.rollback()
+            logger.warning(f"Skipping records due to integrity error: {e}")
 
 
 def fetch_comments_data(
     network: str = "polkadot",
     data_dir: Optional[str] = None,
-    max_items: int = 1000,
+    max_items: Optional[int] = 1000000,
 ):
     """Fetch Polkassembly comments for a specific network, store locally, and load into DB."""
     data_dir = _resolve_data_dir(data_dir)
@@ -148,6 +136,7 @@ def fetch_comments_data(
 
 if __name__ == "__main__":
     target_network = os.getenv("POLKASSEMBLY_COMMENTS_NETWORK", "polkadot")
-    max_items = int(os.getenv("POLKASSEMBLY_COMMENTS_MAX_ITEMS", "1000"))
+    max_items_env = os.getenv("POLKASSEMBLY_COMMENTS_MAX_ITEMS", "1000000")
+    max_items = int(max_items_env) if max_items_env else None
     fetch_comments_data(network=target_network, max_items=max_items)
 
