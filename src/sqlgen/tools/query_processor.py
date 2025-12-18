@@ -49,13 +49,17 @@ class ToolBasedQueryProcessor:
     def process_query(self, query: str, conversation_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         logger.info(f"[ToolBasedProcessor] Processing query: {query[:100]}")
         
-        tool_name, result = self.selector.process_query(query, conversation_history)
+        tool_names, result = self.selector.process_query(query, conversation_history)
+        
+        sql_queries = result.metadata.get("sql_queries", [])
+        if not sql_queries and result.sql_query:
+            sql_queries = [result.sql_query]
         
         if not result.success:
             logger.warning(f"[ToolBasedProcessor] Tool execution failed: {result.error}")
             return {
                 "original_query": query,
-                "sql_queries": [result.sql_query] if result.sql_query else [],
+                "sql_queries": sql_queries,
                 "result_count": 0,
                 "results": [],
                 "columns": [],
@@ -63,23 +67,28 @@ class ToolBasedQueryProcessor:
                 "success": False,
                 "error": result.error,
                 "error_type": result.error_type,
-                "tool_used": tool_name,
+                "tool_used": tool_names[0] if tool_names else None,
+                "tools_used": tool_names,
                 "tool_fallback_needed": True,
                 "metadata": result.metadata
             }
         
-        logger.info(f"[ToolBasedProcessor] Tool '{tool_name}' returned {result.total_count} results")
+        if tool_names and len(tool_names) > 1:
+            logger.info(f"[ToolBasedProcessor] Tools {', '.join(tool_names)} returned {result.total_count} combined results")
+        else:
+            logger.info(f"[ToolBasedProcessor] Tool '{tool_names[0] if tool_names else 'unknown'}' returned {result.total_count} results")
         
         return {
             "original_query": query,
-            "sql_queries": [result.sql_query],
+            "sql_queries": sql_queries,
             "result_count": result.total_count,
             "results": result.data,
             "columns": result.columns,
             "natural_response": None,
             "success": True,
             "error": None,
-            "tool_used": tool_name,
+            "tool_used": tool_names[0] if tool_names else None,
+            "tools_used": tool_names,
             "tool_fallback_needed": False,
             "metadata": result.metadata
         }
