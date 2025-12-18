@@ -144,6 +144,11 @@ class PostgresInserter:
     def _infer_postgres_type(self, column_name: str, series: pd.Series) -> str:
         """Infer PostgreSQL data type from schema info or pandas Series"""
         
+        col_lower = column_name.lower()
+        
+        if 'linkedpost_indexorhash' in col_lower:
+            return 'TEXT'
+        
         if self.schema_info and column_name in self.schema_info:
             schema_type = self.schema_info[column_name].get('data_type', '').lower()
             
@@ -162,8 +167,6 @@ class PostgresInserter:
                 return 'TEXT'
             elif schema_type == 'object':
                 return 'TEXT'
-        
-        col_lower = column_name.lower()
         
         if pd.api.types.is_integer_dtype(series):
             logger.info(f"Column {column_name} detected as integer, using NUMERIC for safety")

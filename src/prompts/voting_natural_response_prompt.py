@@ -20,7 +20,7 @@ RESPONSE GUIDELINES:
             2. ANSWER FIRST: Start with the direct answer to the user's question
 3. KEY DATA:
    - Format proposal links: https://polkadot.polkassembly.io/referenda/{{proposal_index}}
-   - Format voting power: Remove 10 zeros (e.g., 10000000000 = 1 DOT)
+   - Format voting power: Use proper BN balance formatting (e.g., 10000000000 = 1.00 DOT for Polkadot, 1000000000000 = 1.00 KSM for Kusama)
    - Show voter addresses, decisions, conviction levels when relevant
 
 4. MINIMAL CONTEXT: Only add analysis if explicitly asked
