@@ -11,22 +11,29 @@ The design ensures that:
 - Same source + same content = same chunk_id and chunk_hash
 - Formatting noise (extra spaces, line endings) doesn't break identity
 - Content changes result in different hashes
+
+NEW SCHEME (deterministic, source-scoped):
+- chunk_id = <source>:<doc_key>:<chunking_key>
+- chunk_hash = SHA256(chunk_id + "||" + normalized_text)
+- Mapping: (chunk_id, chunk_hash) -> UAL
 """
 
 import hashlib
 import re
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 def normalize_text(text: str) -> str:
     """
     Apply canonical normalization to chunk text before hashing.
     
-    Rules (applied in order):
-    1. Strip leading/trailing whitespace
-    2. Normalize all line endings to \n
-    3. Collapse multiple consecutive whitespace chars to single space
-    4. Preserve case (we don't lowercase - content meaning matters)
+    FROZEN RULES (never change without migration):
+    1. Trim leading/trailing whitespace
+    2. Convert Windows newlines to \n
+    3. Collapse repeated spaces/tabs to single spaces
+    4. Collapse \n{3,} to \n\n
+    5. Strip each line, then rejoin with \n
+    6. Preserve case (content meaning matters)
     
     This normalization is intentionally simple and stable.
     Do NOT change these rules without re-indexing all data.
@@ -49,36 +56,69 @@ def normalize_text(text: str) -> str:
     return normalized
 
 
+def _get_source_prefix(source_type: str) -> str:
+    """
+    Map source type to deterministic source prefix.
+    
+    Source prefixes (frozen):
+    - wiki: PolkaWiki pages
+    - aag: AAG video transcripts
+    - pa_md: Polkassembly markdown docs
+    - pa_doc: Polkassembly official docs
+    - network: Polkadot Network docs
+    """
+    mapping = {
+        "polka_wiki": "wiki",
+        "polkassembly_doc": "pa_md",
+        "polkadot_network": "network",
+        "aag": "aag",
+        "doc": "wiki",  # default fallback
+    }
+    return mapping.get(source_type.lower(), "unknown")
+
+
 def generate_chunk_id(
-    source_id: str,
-    start_offset: int,
-    end_offset: int,
-    source_type: str = "doc"
+    source: str,
+    doc_key: str,
+    chunking_key: str,
+    source_type: Optional[str] = None
 ) -> str:
     """
-    Generate a stable, deterministic chunk ID.
+    Generate deterministic chunk ID using new scheme.
     
-    Format: {source_type}:{source_id}:{start}-{end}
+    Format: <source>:<doc_key>:<chunking_key>
     
     Examples:
-    - doc:polka_wiki_staking:0-1000
+    - wiki:staking:introduction:0
+    - wiki:staking:staking/basics:1
     - aag:YT_abc123:230-420
+    - pa_md:governance_guide:overview:0
     
     Args:
-        source_id: Unique identifier for the source document/video
-        start_offset: Character offset where this chunk starts in the source
-        end_offset: Character offset where this chunk ends in the source
-        source_type: Type prefix ("doc" or "aag")
+        source: Source prefix (e.g., "wiki", "aag", "pa_md")
+               If None, will be derived from source_type
+        doc_key: Stable document identifier (e.g., page slug, video ID)
+        chunking_key: Chunking identifier (e.g., "section_id:chunk_index" or "start-end")
+        source_type: Optional source type string (used if source is None)
         
     Returns:
-        Stable chunk ID string
+        Deterministic chunk ID string
         
     Important:
-    - source_id should be sanitized (no colons, safe chars only)
-    - Offsets are character-based for docs, second-based for AAG
+    - All components are sanitized (no colons except as separators)
+    - Source prefix prevents cross-source collisions
+    - chunking_key should be stable across re-chunking (use semantic boundaries)
     """
-    safe_source_id = source_id.replace(':', '_').replace(' ', '_')
-    return f"{source_type}:{safe_source_id}:{start_offset}-{end_offset}"
+    if source is None:
+        source = _get_source_prefix(source_type or "doc")
+    
+    safe_source = source.replace(':', '_').replace(' ', '_')
+    safe_doc_key = doc_key.replace(':', '_').replace(' ', '_')
+    safe_chunking_key = chunking_key.replace(' ', '_')
+    
+    return f"{safe_source}:{safe_doc_key}:{safe_chunking_key}"
+
+
 
 
 def generate_chunk_hash(
@@ -109,42 +149,43 @@ def generate_chunk_hash(
 
 
 def compute_chunk_identity(
-    source_id: str,
-    start_offset: int,
-    end_offset: int,
+    source: str,
+    doc_key: str,
+    chunking_key: str,
     raw_text: str,
-    source_type: str = "doc"
+    source_type: Optional[str] = None
 ) -> Tuple[str, str, str]:
     """
-    Compute full chunk identity in one call.
+    Compute full chunk identity in one call (new scheme).
     
     This is the primary entry point for chunk identity computation.
     Use this when ingesting new chunks.
     
     Args:
-        source_id: Unique identifier for source document/video
-        start_offset: Start position in source
-        end_offset: End position in source
+        source: Source prefix (e.g., "wiki", "aag") or None to derive from source_type
+        doc_key: Stable document identifier (e.g., page slug, video ID)
+        chunking_key: Chunking identifier (e.g., "section_id:chunk_index" or "start-end")
         raw_text: The raw chunk text (will be normalized)
-        source_type: "doc" or "aag"
+        source_type: Optional source type string (used if source is None)
         
     Returns:
         Tuple of (chunk_id, chunk_hash, normalized_text)
         
     Example:
         chunk_id, chunk_hash, normalized = compute_chunk_identity(
-            source_id="polka_wiki_staking",
-            start_offset=0,
-            end_offset=1000,
+            source="wiki",
+            doc_key="staking",
+            chunking_key="introduction:0",
             raw_text="  Some text with extra   spaces  ",
-            source_type="doc"
         )
     """
-    chunk_id = generate_chunk_id(source_id, start_offset, end_offset, source_type)
+    chunk_id = generate_chunk_id(source, doc_key, chunking_key, source_type)
     normalized = normalize_text(raw_text)
     chunk_hash = generate_chunk_hash(chunk_id, normalized)
     
     return chunk_id, chunk_hash, normalized
+
+
 
 
 def verify_chunk_hash(

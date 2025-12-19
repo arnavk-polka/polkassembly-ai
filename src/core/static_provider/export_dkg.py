@@ -10,7 +10,7 @@ import argparse
 import json
 import logging
 from collections import defaultdict
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .provider import StaticProvider
 from ..config import Config
@@ -48,18 +48,26 @@ def _fetch_all_chunks(collection) -> List[Dict[str, Any]]:
     return chunks
 
 
-def _convert_to_jsonld(asset: Dict[str, Any]) -> Dict[str, Any]:
+def _convert_to_jsonld(asset: Dict[str, Any], context: Optional[str] = None) -> Dict[str, Any]:
     """
-    Convert custom asset format to valid JSON-LD (schema.org).
+    Convert custom asset format to valid JSON-LD.
     
-    DKG requires:
-    - @context: "https://schema.org" (simple string, no custom namespaces)
-    - @type: schema.org type (e.g., "CreativeWork", "Dataset")
-    - Standard schema.org properties only
+    Args:
+        asset: Asset data dictionary
+        context: JSON-LD context (defaults to "https://schema.org" if not provided)
+                 Can be a string URL or a dict for multiple contexts
+    
+    DKG-compatible format:
+    - @context: JSON-LD context (defaults to schema.org)
+    - @type: schema.org type (e.g., "CreativeWork", "Dataset", "Collection")
+    - Standard schema.org properties
     - Custom data goes in additionalProperty (valid schema.org pattern)
     """
     chunks = asset.get("chunks", [])
     metadata = asset.get("metadata", {})
+    
+    if context is None:
+        context = asset.get("@context", "https://schema.org")
     
     additional_props = [
         {"@type": "PropertyValue", "name": "source", "value": asset.get("source", "")},
@@ -85,7 +93,7 @@ def _convert_to_jsonld(asset: Dict[str, Any]) -> Dict[str, Any]:
         })
     
     jsonld = {
-        "@context": "https://schema.org",
+        "@context": context,
         "@type": "CreativeWork",
         "name": asset.get("title", asset.get("doc_id", "Untitled Document")),
         "description": metadata.get("description", "") or "Documentation asset",
@@ -170,9 +178,15 @@ def _group_by_doc(chunks: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return assets
 
 
-def export_docs_per_doc(output_path: str) -> None:
+def export_docs_per_doc(output_path: str, context: Optional[str] = None, source_filter: Optional[str] = None) -> None:
     """
     Export the docs collection to JSONL (asset-per-doc).
+    
+    Args:
+        output_path: Path to write JSONL file
+        context: Optional JSON-LD context (defaults to "https://schema.org")
+        source_filter: Optional source type to filter by (e.g., "polka_wiki"). 
+                      If None, exports all sources.
     """
     provider = StaticProvider(
         openai_api_key=Config.OPENAI_API_KEY,
@@ -181,17 +195,27 @@ def export_docs_per_doc(output_path: str) -> None:
     )
     collection = provider.get_docs_collection()
     chunks = _fetch_all_chunks(collection)
+    
+    if source_filter:
+        filtered_chunks = []
+        for chunk in chunks:
+            meta = chunk.get("metadata", {})
+            if meta.get("source") == source_filter:
+                filtered_chunks.append(chunk)
+        chunks = filtered_chunks
+        logger.info(f"Filtered to {len(chunks)} chunks from source '{source_filter}'")
+    
     assets = _group_by_doc(chunks)
 
     with open(output_path, "w", encoding="utf-8") as f:
         for asset in assets.values():
-            jsonld = _convert_to_jsonld(asset)
+            jsonld = _convert_to_jsonld(asset, context=context)
             f.write(json.dumps(jsonld, ensure_ascii=False) + "\n")
 
     logger.info("Exported %s assets to %s", len(assets), output_path)
 
 
-def export_single_assets(output_path: str) -> None:
+def export_single_assets(output_path: str, context: Optional[str] = None) -> None:
     """
     Export two assets total:
     - One aggregated asset for docs (all chunks)
@@ -284,7 +308,7 @@ def export_single_assets(output_path: str) -> None:
 
     with open(output_path, "w", encoding="utf-8") as f:
         for asset in exports:
-            jsonld = _convert_to_jsonld(asset)
+            jsonld = _convert_to_jsonld(asset, context=context)
             f.write(json.dumps(jsonld, ensure_ascii=False) + "\n")
 
     logger.info(
@@ -309,11 +333,23 @@ def main():
         default="per_doc",
         help="per_doc: one asset per document; single: two assets total (docs + aag).",
     )
+    parser.add_argument(
+        "--context",
+        type=str,
+        default=None,
+        help="JSON-LD context URL (defaults to 'https://schema.org'). Can be a URL string.",
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Filter by source type (e.g., 'polka_wiki', 'polkassembly_doc'). If not specified, exports all sources.",
+    )
     args = parser.parse_args()
     if args.mode == "per_doc":
-        export_docs_per_doc(args.output)
+        export_docs_per_doc(args.output, context=args.context, source_filter=args.source)
     else:
-        export_single_assets(args.output)
+        export_single_assets(args.output, context=args.context)
 
 
 if __name__ == "__main__":

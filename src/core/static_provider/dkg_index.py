@@ -10,6 +10,11 @@ from dkg.providers import BlockchainProvider, NodeHTTPProvider
 from dkg.constants import BlockchainIds
 
 from ..config import Config
+from .ual_mapping_db import (
+    load_all_ual_mappings,
+    create_ual_mapping_table,
+    get_ual_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +49,24 @@ def _load_jsonl_file(path: str) -> List[Dict[str, Any]]:
     return assets
 
 
-def _build_index_from_asset(asset: Dict[str, Any], asset_ual: Optional[str] = None) -> Dict[str, Tuple[str, str]]:
-    index: Dict[str, Tuple[str, str]] = {}
+def _build_index_from_asset(asset: Dict[str, Any], asset_ual: Optional[str] = None) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """
+    Build index using compound key: (chunk_id, chunk_hash) -> {ual, asset_version, published_at}
+    
+    Returns:
+        Dict mapping (chunk_id, chunk_hash) tuple to UAL metadata
+    """
+    index: Dict[Tuple[str, str], Dict[str, Any]] = {}
     if not asset:
         return index
     
     ual = asset_ual or asset.get("asset_ual") or asset.get("ual") or asset.get("@id") or ""
+    asset_version = asset.get("version", 1)
     
     has_part = asset.get("hasPart") or []
     for part in has_part:
-        identifier = part.get("identifier") or part.get("@id") or ""
-        if not identifier:
+        chunk_id = part.get("identifier") or part.get("@id") or ""
+        if not chunk_id:
             continue
         chunk_hash = ""
         for prop in part.get("additionalProperty", []):
@@ -63,18 +75,26 @@ def _build_index_from_asset(asset: Dict[str, Any], asset_ual: Optional[str] = No
                 break
         if not chunk_hash:
             continue
-        index[identifier] = (ual, chunk_hash)
+        key = (chunk_id, chunk_hash)
+        index[key] = {
+            "ual": ual,
+            "asset_version": asset_version,
+            "chunk_hash": chunk_hash,
+        }
     return index
 
 
-def _parse_assertion_graph(assertion: List[Dict[str, Any]], asset_ual: str) -> Dict[str, Tuple[str, str]]:
+def _parse_assertion_graph(assertion: List[Dict[str, Any]], asset_ual: str) -> Dict[Tuple[str, str], Dict[str, Any]]:
     """
-    Parse DKG assertion graph (JSON-LD format) to extract chunk_id -> (asset_ual, chunk_hash) mappings.
+    Parse DKG assertion graph (JSON-LD format) to extract (chunk_id, chunk_hash) -> UAL mappings.
     
     Looks for Schema.org hasPart relationships and chunkHash properties in the assertion.
     Handles both expanded JSON-LD (full IRIs) and compact form.
+    
+    Returns:
+        Dict mapping (chunk_id, chunk_hash) tuple to UAL metadata
     """
-    index: Dict[str, Tuple[str, str]] = {}
+    index: Dict[Tuple[str, str], Dict[str, Any]] = {}
     
     if not assertion or not isinstance(assertion, list):
         return index
@@ -136,7 +156,12 @@ def _parse_assertion_graph(assertion: List[Dict[str, Any]], asset_ual: str) -> D
                         break
             
             if chunk_hash and part_id:
-                index[part_id] = (asset_ual, chunk_hash)
+                key = (part_id, chunk_hash)
+                index[key] = {
+                    "ual": asset_ual,
+                    "asset_version": 1,
+                    "chunk_hash": chunk_hash,
+                }
     
     return index
 
@@ -185,7 +210,7 @@ def trigger_asset_sync(ual: str, node_endpoint: str, blockchain: str) -> bool:
         return False
 
 
-def _load_index_from_remote() -> Dict[str, Tuple[str, str]]:
+def _load_index_from_remote() -> Dict[Tuple[str, str], Dict[str, Any]]:
     """
     Load chunk index from a live DKG knowledge asset using the SDK.
 
@@ -292,7 +317,12 @@ def _load_index_from_remote() -> Dict[str, Tuple[str, str]]:
                                 part_id = part_id.get("@value") or part_id.get("value") or str(part_id)
                             if isinstance(chunk_hash, dict):
                                 chunk_hash = chunk_hash.get("@value") or chunk_hash.get("value") or str(chunk_hash)
-                            index[str(part_id)] = (ual, str(chunk_hash))
+                            key = (str(part_id), str(chunk_hash))
+                            index[key] = {
+                                "ual": ual,
+                                "asset_version": 1,
+                                "chunk_hash": str(chunk_hash),
+                            }
                     logger.info(f"Built index with {len(index)} entries from SPARQL query")
                 else:
                     logger.warning("SPARQL query returned no hasPart data - asset may not be synced to node yet")
@@ -337,11 +367,13 @@ def _load_index_from_remote() -> Dict[str, Tuple[str, str]]:
         return {}
 
 
-def _load_published_chunk_index(index_path: str = "dkg_chunk_index.json") -> Dict[str, Tuple[str, str]]:
+def _load_published_chunk_index(index_path: str = "dkg_chunk_index.json") -> Dict[Tuple[str, str], Dict[str, Any]]:
     """
     Load the chunk index created by publish_dkg_batched.py.
     This contains actual UALs from published assets.
-    Format: {chunk_id: {ual: str, chunk_hash: str}}
+    
+    Supports both old format: {chunk_id: {ual: str, chunk_hash: str}}
+    and new format: {(chunk_id, chunk_hash): {ual: str, asset_version: int, ...}}
     """
     if not os.path.exists(index_path):
         return {}
@@ -350,13 +382,32 @@ def _load_published_chunk_index(index_path: str = "dkg_chunk_index.json") -> Dic
         with open(index_path, "r", encoding="utf-8") as f:
             raw_index = json.load(f)
         
-        index: Dict[str, Tuple[str, str]] = {}
-        for chunk_id, data in raw_index.items():
-            if isinstance(data, dict):
-                ual = data.get("ual", "")
-                chunk_hash = data.get("chunk_hash", "")
-                if ual and chunk_hash:
-                    index[chunk_id] = (ual, chunk_hash)
+        index: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for key_str, data in raw_index.items():
+            if not isinstance(data, dict):
+                continue
+            
+            ual = data.get("ual", "")
+            chunk_hash = data.get("chunk_hash", "")
+            
+            if not ual or not chunk_hash:
+                continue
+            
+            if "||" in key_str:
+                chunk_id, hash_from_key = key_str.split("||", 1)
+                if hash_from_key != chunk_hash:
+                    continue
+                index_key = (chunk_id, chunk_hash)
+            else:
+                chunk_id = str(key_str)
+                index_key = (chunk_id, chunk_hash)
+            
+            index[index_key] = {
+                "ual": ual,
+                "asset_version": data.get("asset_version", 1),
+                "chunk_hash": chunk_hash,
+                "published_at": data.get("published_at", ""),
+            }
         
         if index:
             logger.info(f"Loaded published chunk index from '{index_path}' with {len(index)} entries")
@@ -373,20 +424,41 @@ def load_dkg_chunk_index(
     asset_doc_path: str = "dkg_asset_doc.json",
     docs_export_path: str = "dkg_docs_export.jsonl",
     published_index_path: str = "dkg_chunk_index.json",
-) -> Dict[str, Tuple[str, str]]:
+    use_database: bool = True,
+) -> Dict[Tuple[str, str], Dict[str, Any]]:
     """
-    Build an in-memory index:
-        chunk_id -> (asset_ual, chunk_hash)
+    Build an in-memory index using compound key:
+        (chunk_id, chunk_hash) -> {ual, asset_version, chunk_hash, published_at}
 
-    Priority:
-    1. Published chunk index (dkg_chunk_index.json) - created by publish_dkg_batched.py with actual UALs
+    Priority (if use_database=True):
+    1. Database table 'ual_mapping' (primary source)
     2. Live DKG knowledge asset via SDK (Config.DKG_POLKAWIKI_ASSET_UAL)
-    3. dkg_asset_doc.json (single asset with hasPart and a known asset UAL, if present)
-    4. dkg_docs_export.jsonl (multiple assets; caller is expected to know UALs separately)
+    3. Fallback to JSON files if database unavailable
     
-    Uses file modification time for cache invalidation.
+    Priority (if use_database=False, legacy mode):
+    1. Published chunk index (dkg_chunk_index.json)
+    2. Live DKG knowledge asset via SDK
+    3. dkg_asset_doc.json
+    4. dkg_docs_export.jsonl
+    
+    Returns:
+        Dict mapping (chunk_id, chunk_hash) tuple to UAL metadata
     """
     global _cache_key, _cached_index
+    
+    if use_database:
+        try:
+            create_ual_mapping_table()
+            index = load_all_ual_mappings()
+            
+            if index:
+                logger.info(f"Loaded DKG chunk index from database with {len(index)} entries.")
+                _cached_index = index
+                return index
+            else:
+                logger.info("Database UAL mappings table is empty, trying fallback sources...")
+        except Exception as e:
+            logger.warning(f"Failed to load from database: {e}, falling back to file-based index")
     
     published_path = Path(published_index_path)
     current_key = published_path.stat().st_mtime if published_path.exists() else 0
@@ -397,7 +469,9 @@ def load_dkg_chunk_index(
     index = _load_published_chunk_index(published_index_path)
     
     if not index:
-        index = _load_index_from_remote()
+        remote_index = _load_index_from_remote()
+        if remote_index:
+            index.update(remote_index)
 
     if not index:
         asset_doc = _load_json_file(asset_doc_path)
@@ -408,10 +482,11 @@ def load_dkg_chunk_index(
         assets = _load_jsonl_file(docs_export_path)
         for asset in assets:
             asset_ual = asset.get("asset_ual") or ""
+            asset_version = asset.get("version", 1)
             has_part = asset.get("hasPart") or []
             for part in has_part:
-                identifier = part.get("identifier")
-                if not identifier:
+                chunk_id = part.get("identifier")
+                if not chunk_id:
                     continue
                 chunk_hash = ""
                 for prop in part.get("additionalProperty", []):
@@ -420,7 +495,13 @@ def load_dkg_chunk_index(
                         break
                 if not chunk_hash:
                     continue
-                index.setdefault(identifier, (asset_ual, chunk_hash))
+                key = (chunk_id, chunk_hash)
+                if key not in index:
+                    index[key] = {
+                        "ual": asset_ual,
+                        "asset_version": asset_version,
+                        "chunk_hash": chunk_hash,
+                    }
 
     if not index:
         logger.info("DKG chunk index is empty; dkg_match will remain None.")

@@ -31,7 +31,11 @@ import numpy as np
 import tiktoken
 
 from .types import StaticSourceType
-from .hashing import compute_chunk_identity, normalize_text
+from .hashing import (
+    compute_chunk_identity,
+    normalize_text,
+    _get_source_prefix,
+)
 from .provider import StaticProvider
 from ..config import Config
 
@@ -88,6 +92,110 @@ class StaticIngester:
             return len(self.encoding.encode(text))
         except Exception:
             return len(text) // 4
+    
+    def _extract_semantic_boundaries(self, text: str) -> List[Tuple[str, int, int]]:
+        """
+        Extract semantic boundaries (headings/sections) from text.
+        
+        Returns list of (section_id, start_char, end_char) tuples.
+        section_id is a path-like identifier (e.g., "introduction", "staking/basics").
+        
+        Falls back to simple paragraph-based splitting if no clear headings found.
+        """
+        sections = []
+        lines = text.split('\n')
+        current_section = "root"
+        current_path = []
+        section_start = 0
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            if not stripped:
+                continue
+            
+            if stripped.startswith('#'):
+                level = len(stripped) - len(stripped.lstrip('#'))
+                heading_text = stripped.lstrip('#').strip()
+                
+                if heading_text:
+                    heading_slug = heading_text.lower().replace(' ', '_').replace('/', '_')
+                    heading_slug = ''.join(c for c in heading_slug if c.isalnum() or c in ('_', '-'))
+                    
+                    current_path = current_path[:level-1] + [heading_slug]
+                    current_section = '/'.join(current_path) if current_path else "root"
+                    
+                    char_pos = sum(len(l) + 1 for l in lines[:i])
+                    if section_start < char_pos:
+                        sections.append((current_section, section_start, char_pos))
+                    section_start = char_pos
+        
+        if section_start < len(text):
+            sections.append((current_section, section_start, len(text)))
+        
+        if not sections:
+            sections = [("root", 0, len(text))]
+        
+        return sections
+    
+    def _chunk_with_semantic_boundaries(
+        self,
+        text: str,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None
+    ) -> List[Tuple[str, int, int, str]]:
+        """
+        Chunk text using semantic boundaries, then sub-chunk within sections.
+        
+        Returns list of (chunk_text, start_offset, end_offset, chunking_key) tuples.
+        chunking_key format: "section_id:chunk_index"
+        """
+        chunk_size = chunk_size or self.chunk_size
+        chunk_overlap = chunk_overlap or self.chunk_overlap
+        
+        if not text or not text.strip():
+            return []
+        
+        sections = self._extract_semantic_boundaries(text)
+        all_chunks = []
+        
+        for section_id, section_start, section_end in sections:
+            section_text = text[section_start:section_end]
+            
+            if not section_text.strip():
+                continue
+            
+            tokens = self.encoding.encode(section_text)
+            if len(tokens) <= chunk_size:
+                chunking_key = f"{section_id}:0"
+                all_chunks.append((section_text, section_start, section_end, chunking_key))
+                continue
+            
+            chunk_index = 0
+            token_start = 0
+            
+            while token_start < len(tokens):
+                token_end = min(token_start + chunk_size, len(tokens))
+                chunk_tokens = tokens[token_start:token_end]
+                chunk_text = self.encoding.decode(chunk_tokens)
+                
+                text_before = self.encoding.decode(tokens[:token_start])
+                char_start = section_start + len(text_before)
+                char_end = char_start + len(chunk_text)
+                
+                if chunk_text.strip():
+                    chunking_key = f"{section_id}:{chunk_index}"
+                    all_chunks.append((chunk_text, char_start, char_end, chunking_key))
+                    chunk_index += 1
+                
+                if token_end >= len(tokens):
+                    break
+                
+                token_start = token_end - chunk_overlap
+                if token_start >= token_end:
+                    token_start = token_end
+        
+        return all_chunks
     
     def _chunk_text_with_offsets(
         self,
@@ -238,6 +346,16 @@ class StaticIngester:
         else:
             return StaticSourceType.UNKNOWN.value
     
+    def _get_doc_key(self, file_path: Path, subdir_name: str) -> str:
+        """
+        Generate stable doc_key from file path.
+        
+        Examples:
+        - polkadot_wiki/staking.txt -> "staking"
+        - pa_docs/governance.md -> "governance"
+        """
+        return file_path.stem.replace(' ', '_').replace(':', '_')
+    
     def ingest_docs_from_directory(
         self,
         data_dir: str,
@@ -295,22 +413,28 @@ class StaticIngester:
                         continue
                     
                     doc_id = f"{subdir.name}_{file_path.stem}"
-                    chunks_with_offsets = self._chunk_text_with_offsets(content)
+                    doc_key = self._get_doc_key(file_path, subdir.name)
+                    source_prefix = _get_source_prefix(source_type)
                     
-                    for chunk_text, start_offset, end_offset in chunks_with_offsets:
+                    chunks_with_keys = self._chunk_with_semantic_boundaries(content)
+                    
+                    for chunk_text, start_offset, end_offset, chunking_key in chunks_with_keys:
                         chunk_id, chunk_hash, normalized = compute_chunk_identity(
-                            source_id=doc_id,
-                            start_offset=start_offset,
-                            end_offset=end_offset,
+                            source=source_prefix,
+                            doc_key=doc_key,
+                            chunking_key=chunking_key,
                             raw_text=chunk_text,
-                            source_type="doc"
+                            source_type=source_type
                         )
                         
                         chunk_metadata = {
                             "chunk_id": chunk_id,
                             "chunk_hash": chunk_hash,
                             "source": source_type,
+                            "source_prefix": source_prefix,
                             "doc_id": doc_id,
+                            "doc_key": doc_key,
+                            "chunking_key": chunking_key,
                             "title": file_metadata.get("title", file_path.stem),
                             "source_url": file_metadata.get("source_url", ""),
                             "description": file_metadata.get("description", ""),
@@ -421,11 +545,12 @@ class StaticIngester:
                         
                         start_second = seg.get("start", 0)
                         end_second = seg.get("end", 0)
+                        chunking_key = f"{int(start_second)}-{int(end_second)}"
                         
                         chunk_id, chunk_hash, normalized = compute_chunk_identity(
-                            source_id=video_id,
-                            start_offset=int(start_second),
-                            end_offset=int(end_second),
+                            source="aag",
+                            doc_key=video_id,
+                            chunking_key=chunking_key,
                             raw_text=seg_text,
                             source_type="aag"
                         )
@@ -459,13 +584,13 @@ class StaticIngester:
                         stats["videos_skipped"] += 1
                         continue
                     
-                    chunks_with_offsets = self._chunk_text_with_offsets(transcript_text)
+                    chunks_with_keys = self._chunk_with_semantic_boundaries(transcript_text)
                     
-                    for chunk_text, start_offset, end_offset in chunks_with_offsets:
+                    for chunk_text, start_offset, end_offset, chunking_key in chunks_with_keys:
                         chunk_id, chunk_hash, normalized = compute_chunk_identity(
-                            source_id=video_id,
-                            start_offset=start_offset,
-                            end_offset=end_offset,
+                            source="aag",
+                            doc_key=video_id,
+                            chunking_key=chunking_key,
                             raw_text=chunk_text,
                             source_type="aag"
                         )
@@ -558,16 +683,17 @@ class StaticIngester:
         Returns:
             Summary dict
         """
-        chunks_with_offsets = self._chunk_text_with_offsets(content)
+        source_prefix = _get_source_prefix(source_type)
+        chunks_with_keys = self._chunk_with_semantic_boundaries(content)
         all_chunks = []
         
-        for chunk_text, start_offset, end_offset in chunks_with_offsets:
+        for chunk_text, start_offset, end_offset, chunking_key in chunks_with_keys:
             chunk_id, chunk_hash, normalized = compute_chunk_identity(
-                source_id=doc_id,
-                start_offset=start_offset,
-                end_offset=end_offset,
+                source=source_prefix,
+                doc_key=doc_id,
+                chunking_key=chunking_key,
                 raw_text=chunk_text,
-                source_type="doc"
+                source_type=source_type
             )
             
             chunk_metadata = {

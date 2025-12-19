@@ -155,19 +155,18 @@ class StaticProvider:
             source = meta.get('source', source_type)
 
             dkg_match = None
-            if chunk_id in dkg_index:
-                asset_ual, indexed_hash = dkg_index[chunk_id]
-                if indexed_hash and chunk_hash and indexed_hash == chunk_hash:
+            if chunk_id and chunk_hash:
+                lookup_key = (chunk_id, chunk_hash)
+                if lookup_key in dkg_index:
+                    ual_data = dkg_index[lookup_key]
                     dkg_match = DKGMatch(
-                        asset_ual=asset_ual,
+                        asset_ual=ual_data.get("ual", ""),
                         chunk_id=chunk_id,
                         chunk_hash=chunk_hash,
                     )
-                    logger.info(f"✓ Created dkg_match for chunk_id={chunk_id[:50]}..., ual={asset_ual}")
+                    logger.info(f"✓ Created dkg_match for chunk_id={chunk_id[:50]}..., ual={ual_data.get('ual', '')[:50]}...")
                 else:
-                    logger.warning(f"✗ Hash mismatch for chunk_id={chunk_id[:50]}...: indexed={indexed_hash[:16] if indexed_hash else None}... vs chunk={chunk_hash[:16] if chunk_hash else None}...")
-            else:
-                logger.warning(f"✗ chunk_id={chunk_id[:50]}... not found in dkg_index (index has {len(dkg_index)} entries)")
+                    logger.debug(f"✗ (chunk_id, chunk_hash) pair not found in dkg_index for {chunk_id[:50]}...")
             
             result = StaticSearchResult(
                 id=chunk_id,
