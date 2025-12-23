@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-Publish dkg_asset_doc.json to DKG in batches.
 Splits large asset into smaller ones and stores UAL mappings in database.
 """
 import os
@@ -211,10 +210,157 @@ def publish_batch(dkg, batch: dict, batch_num: int, publish_options: dict, colle
             logger.info(f"Publishing batch {batch_num} to DKG (attempt {attempt}/{max_retries})...")
             logger.info(f"  This may take 30-60 seconds for blockchain confirmation...")
             try:
+                logger.debug(f"Content keys: {list(content.keys())}")
+                logger.debug(f"Public content type: {type(content.get('public'))}")
+                logger.debug(f"Publish options: {publish_options}")
                 result = dkg.asset.create(content, publish_options)
                 logger.info(f"✓ Received response from DKG for batch {batch_num}")
             except Exception as api_error:
-                logger.error(f"✗ DKG API error for batch {batch_num}: {api_error}")
+                import sys
+                import traceback
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                
+                tb = exc_traceback
+                found_response = False
+                while tb:
+                    frame = tb.tb_frame
+                    if 'response' in frame.f_locals:
+                        resp = frame.f_locals['response']
+                        logger.error(f"  ✓ Found response in traceback frame: {type(resp)}")
+                        found_response = True
+                        try:
+                            if hasattr(resp, 'text'):
+                                resp_text = resp.text if resp.text else 'None'
+                                logger.error(f"  Response text: {resp_text[:2000]}")
+                            if hasattr(resp, 'status_code'):
+                                logger.error(f"  Response status_code: {resp.status_code}")
+                            if hasattr(resp, 'json'):
+                                try:
+                                    error_json = resp.json()
+                                    logger.error(f"  Response JSON: {error_json}")
+                                except:
+                                    pass
+                        except Exception as resp_err:
+                            logger.error(f"  Error reading frame response: {resp_err}")
+                    tb = tb.tb_next
+                
+                if not found_response:
+                    logger.error(f"  No response found in traceback frames")
+                
+                error_str = str(api_error)
+                error_type_str = type(api_error).__name__
+                
+                if "retry_get_operation_result" in error_str or ("retries" in error_str.lower() and "100" in error_str):
+                    logger.warning(f"⚠️  Operation timeout for batch {batch_num} (attempt {attempt}/{max_retries})")
+                    logger.warning(f"  The blockchain transaction may still be processing.")
+                    logger.warning(f"  The operation might have succeeded - check manually later.")
+                    logger.warning(f"  Continuing to next batch...")
+                    return ""
+                
+                logger.error(f"✗ DKG API error for batch {batch_num}: {error_str}")
+                
+                try:
+                    logger.error(f"  Error type: {type(api_error).__name__}")
+                    logger.error(f"  Error module: {type(api_error).__module__}")
+                    
+                    attrs = [attr for attr in dir(api_error) if not attr.startswith('_')]
+                    logger.error(f"  Available attributes: {attrs}")
+                    
+                    for attr in ['response', 'request', 'message', 'detail', 'error', 'data', 'body', 'text', 'content']:
+                        if hasattr(api_error, attr):
+                            try:
+                                val = getattr(api_error, attr)
+                                if val is not None:
+                                    if isinstance(val, (str, bytes)):
+                                        logger.error(f"  {attr}: {str(val)[:1000]}")
+                                    elif hasattr(val, 'text'):
+                                        logger.error(f"  {attr}.text: {val.text[:1000] if val.text else 'None'}")
+                                    elif hasattr(val, 'status_code'):
+                                        logger.error(f"  {attr}.status_code: {val.status_code}")
+                                    else:
+                                        logger.error(f"  {attr}: {type(val).__name__} = {str(val)[:500]}")
+                            except Exception as e:
+                                logger.error(f"  Could not access {attr}: {e}")
+                    
+                    if hasattr(api_error, 'args') and api_error.args:
+                        logger.error(f"  Error args: {api_error.args}")
+                        for i, arg in enumerate(api_error.args):
+                            if hasattr(arg, 'response'):
+                                resp = arg.response
+                                if resp and hasattr(resp, 'text'):
+                                    logger.error(f"  Arg[{i}].response.text: {resp.text[:1000]}")
+                    
+                    if hasattr(api_error, '__cause__') and api_error.__cause__:
+                        cause = api_error.__cause__
+                        logger.error(f"  __cause__: {type(cause).__name__} - {str(cause)[:500]}")
+                        if hasattr(cause, 'response'):
+                            cause_resp = cause.response
+                            if cause_resp:
+                                logger.error(f"  __cause__.response.status_code: {getattr(cause_resp, 'status_code', 'N/A')}")
+                                if hasattr(cause_resp, 'text'):
+                                    logger.error(f"  __cause__.response.text: {cause_resp.text[:1000]}")
+                                if hasattr(cause_resp, 'json'):
+                                    try:
+                                        logger.error(f"  __cause__.response.json: {cause_resp.json()}")
+                                    except:
+                                        pass
+                    
+                    if hasattr(api_error, '__context__') and api_error.__context__:
+                        context = api_error.__context__
+                        logger.error(f"  __context__: {type(context).__name__} - {str(context)[:500]}")
+                        logger.error(f"  __context__ type: {type(context)}")
+                        logger.error(f"  __context__ module: {type(context).__module__}")
+                        logger.error(f"  __context__ dir: {[a for a in dir(context) if not a.startswith('_')][:10]}")
+                        
+                        resp = None
+                        try:
+                            if hasattr(context, 'response'):
+                                resp = getattr(context, 'response')
+                                logger.error(f"  ✓ Found response attribute, type: {type(resp)}")
+                                logger.error(f"  Response value: {resp}")
+                        except Exception as e:
+                            logger.error(f"  Error accessing response attr: {e}")
+                            import traceback
+                            logger.error(f"  Traceback: {traceback.format_exc()}")
+                        
+                        if resp:
+                            try:
+                                logger.error(f"  Response status_code: {getattr(resp, 'status_code', 'N/A')}")
+                                if hasattr(resp, 'text'):
+                                    resp_text = resp.text if resp.text else 'None'
+                                    logger.error(f"  Response text: {resp_text[:2000]}")
+                                if hasattr(resp, 'json'):
+                                    try:
+                                        error_json = resp.json()
+                                        logger.error(f"  Response JSON: {error_json}")
+                                    except Exception as json_err:
+                                        logger.error(f"  Could not parse JSON: {json_err}")
+                                if hasattr(resp, 'content'):
+                                    logger.error(f"  Response content (first 500): {resp.content[:500] if resp.content else 'None'}")
+                            except Exception as resp_err:
+                                logger.error(f"  Error reading response: {resp_err}")
+                                import traceback
+                                logger.error(f"  Traceback: {traceback.format_exc()}")
+                        else:
+                            logger.error(f"  Response is None or not accessible")
+                            logger.error(f"  Trying to access via exception args...")
+                            try:
+                                if hasattr(context, 'args') and context.args:
+                                    for i, arg in enumerate(context.args):
+                                        logger.error(f"  Arg[{i}]: {type(arg)} - {str(arg)[:200]}")
+                                        if hasattr(arg, 'response'):
+                                            logger.error(f"  Arg[{i}] has response: {arg.response}")
+                            except Exception as args_err:
+                                logger.error(f"  Error checking args: {args_err}")
+                        
+                except Exception as log_error:
+                    logger.error(f"  Could not extract error details: {log_error}")
+                    import traceback
+                    logger.error(f"  Traceback: {traceback.format_exc()}")
+                
+                import traceback
+                logger.error(f"  Full exception traceback:\n{traceback.format_exception(type(api_error), api_error, api_error.__traceback__)}")
+                
                 if attempt < max_retries:
                     continue
                 raise
@@ -306,6 +452,18 @@ def main():
     node_provider = NodeHTTPProvider(endpoint_uri=node_endpoint, api_version="v1")
     blockchain_provider = BlockchainProvider(blockchain)
     
+    logger.info(f"Node endpoint: {node_endpoint}")
+    logger.info(f"Blockchain: {blockchain}")
+    logger.info(f"Blockchain ID: {blockchain_provider.blockchain_id}")
+    
+    try:
+        node_info = dkg.node.info
+        logger.info(f"Node accessible: v{node_info.get('version')}")
+        if 'blockchain' in node_info:
+            logger.info(f"Node configured blockchain: {node_info.get('blockchain')}")
+    except Exception as e:
+        logger.warning(f"Could not get node info: {e}")
+    
     try:
         blockchain_provider.set_account(private_key)
     except Exception as e:
@@ -315,7 +473,7 @@ def main():
         else:
             raise
     
-    dkg = DKG(node_provider, blockchain_provider, config={"max_number_of_retries": 100, "frequency": 3})
+    dkg = DKG(node_provider, blockchain_provider, config={"max_number_of_retries":10, "frequency": 5})
     
     try:
         node_info = dkg.node.info
@@ -398,7 +556,7 @@ def main():
                 logger.info(f"Loaded existing index with {len(chunk_index)} chunks - will resume from here")
             except Exception as e:
                 logger.warning(f"Could not load existing index: {e}, starting fresh")
-        
+    
         def save_index():
             """Save index to file using compound key format."""
             serializable_index = {}
@@ -409,8 +567,57 @@ def main():
                 json.dump(serializable_index, f, indent=2)
             logger.info(f"Index saved ({len(chunk_index)} chunks)")
     
+    backup_json_file = project_root / "dkg_ual_mappings_backup.json"
+    
+    def save_backup_json():
+        """Save UAL mappings to JSON backup file for manual import if DB fails."""
+        try:
+            if USE_DATABASE:
+                from src.core.static_provider.ual_mapping_db import load_all_ual_mappings
+                mappings = load_all_ual_mappings()
+            else:
+                mappings = chunk_index
+            
+            backup_data = []
+            for key, value in mappings.items():
+                if isinstance(key, tuple) and len(key) == 2:
+                    chunk_id, chunk_hash = key
+                elif isinstance(key, str) and '||' in key:
+                    chunk_id, chunk_hash = key.split('||', 1)
+                else:
+                    chunk_id = key
+                    chunk_hash = value.get('chunk_hash', '')
+                
+                published_at = value.get("published_at", "")
+                if hasattr(published_at, "isoformat"):
+                    published_at_str = published_at.isoformat()
+                elif isinstance(published_at, str):
+                    published_at_str = published_at
+                else:
+                    published_at_str = str(published_at) if published_at else ""
+                
+                backup_data.append({
+                    "chunk_id": chunk_id,
+                    "chunk_hash": chunk_hash,
+                    "ual": value.get("ual", ""),
+                    "asset_version": value.get("asset_version", 1),
+                    "source": value.get("source", ""),
+                    "published_at": published_at_str,
+                })
+            
+            with open(backup_json_file, 'w') as f:
+                json.dump(backup_data, f, indent=2)
+            logger.info(f"✓ Backup JSON saved: {backup_json_file} ({len(backup_data)} mappings)")
+        except Exception as e:
+            logger.warning(f"Failed to save backup JSON: {e}")
+    
     for i, batch in enumerate(batches, 1):
-        ual = publish_batch(dkg, batch, i, publish_options, collection_ual=collection_ual)
+        try:
+            ual = publish_batch(dkg, batch, i, publish_options, collection_ual=collection_ual)
+        except Exception as batch_error:
+            logger.error(f"Batch {i} failed with exception: {batch_error}")
+            ual = None
+            save_backup_json()
         
         if ual:
             chunks = get_chunk_ids_from_batch(batch)
@@ -427,8 +634,14 @@ def main():
                 })
             
             if USE_DATABASE:
-                count = batch_upsert_ual_mappings(mappings)
-                logger.info(f"Saved {count} chunks to database")
+                try:
+                    count = batch_upsert_ual_mappings(mappings)
+                    logger.info(f"Saved {count} chunks to database")
+                except Exception as db_error:
+                    logger.error(f"Failed to save to database: {db_error}")
+                    logger.warning("Continuing with JSON backup only...")
+                
+                save_backup_json()
             else:
                 for mapping in mappings:
                     key = (mapping["chunk_id"], mapping["chunk_hash"])
@@ -437,11 +650,15 @@ def main():
                         "chunk_hash": mapping["chunk_hash"],
                         "asset_version": mapping["asset_version"],
                         "published_at": mapping["published_at"].isoformat(),
-                    }
-                logger.info(f"Added {len(chunks)} chunks to index")
-                save_index()
+                }
+                if 'save_index' in locals():
+                    save_index()
+            logger.info(f"Added {len(chunks)} chunks to index")
         else:
             logger.warning(f"Batch {i} failed - chunks not indexed")
+            save_backup_json()
+            if 'save_backup_json' in locals():
+                save_backup_json()
         
         if i < len(batches):
             wait_time = 10 if ual else 5
@@ -449,7 +666,8 @@ def main():
             time.sleep(wait_time)
     
     if not USE_DATABASE:
-        save_index()
+        if 'save_index' in locals():
+            save_index()
     
     logger.info(f"\n=== Summary ===")
     if USE_DATABASE:
@@ -465,6 +683,10 @@ def main():
     logger.info(f"Unique UALs: {len(uals)}")
     for ual in uals:
         logger.info(f"  - {ual}")
+    
+    if USE_DATABASE:
+        save_backup_json()
+        logger.info(f"✓ Final backup JSON saved: {backup_json_file}")
 
 
 if __name__ == "__main__":

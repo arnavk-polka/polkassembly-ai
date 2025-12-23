@@ -85,20 +85,28 @@ def _convert_to_jsonld(asset: Dict[str, Any], context: Optional[str] = None) -> 
             {"@type": "PropertyValue", "name": "endOffset", "value": str(ch_meta.get("end_offset", ""))},
             {"@type": "PropertyValue", "name": "source", "value": ch_meta.get("source", "")},
         ]
+        chunk_id = ch.get("chunk_id", "")
+        chunk_identifier = f"urn:chunk:{chunk_id}" if chunk_id else f"urn:chunk:unknown_{id(ch)}"
+        
         has_part.append({
             "@type": "CreativeWork",
-            "identifier": ch.get("chunk_id", ""),
+            "@id": chunk_identifier,
+            "identifier": chunk_id,
             "text": ch.get("content", ""),
             "additionalProperty": chunk_props,
         })
     
+    doc_id = asset.get("doc_id", "")
+    doc_identifier = f"urn:doc:{doc_id}" if doc_id else f"urn:doc:unknown_{id(asset)}"
+    
     jsonld = {
         "@context": context,
         "@type": "CreativeWork",
+        "@id": doc_identifier,
         "name": asset.get("title", asset.get("doc_id", "Untitled Document")),
         "description": metadata.get("description", "") or "Documentation asset",
         "url": metadata.get("source_url", "") or None,
-        "identifier": asset.get("doc_id", ""),
+        "identifier": doc_id,
         "version": asset.get("version", 1),
         "dateCreated": metadata.get("created_at", "") or None,
         "dateModified": metadata.get("updated_at", "") or None,

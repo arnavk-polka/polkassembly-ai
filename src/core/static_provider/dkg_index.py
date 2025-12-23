@@ -387,8 +387,8 @@ def _load_published_chunk_index(index_path: str = "dkg_chunk_index.json") -> Dic
             if not isinstance(data, dict):
                 continue
             
-            ual = data.get("ual", "")
-            chunk_hash = data.get("chunk_hash", "")
+                ual = data.get("ual", "")
+                chunk_hash = data.get("chunk_hash", "")
             
             if not ual or not chunk_hash:
                 continue

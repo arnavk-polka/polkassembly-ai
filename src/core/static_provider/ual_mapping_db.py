@@ -2,7 +2,10 @@
 Database operations for UAL (Universal Asset Locator) mappings.
 
 Stores mappings: (chunk_id, chunk_hash) -> {ual, asset_version, published_at}
-in PostgreSQL database table 'ual_mapping'.
+in PostgreSQL database table.
+
+Table name is configurable via DKG_UAL_TABLE_NAME environment variable.
+Defaults to 'ual_mapping' for testnet, 'mainnet_uals' for mainnet (based on DKG_BLOCKCHAIN).
 """
 
 import os
@@ -12,8 +15,29 @@ from psycopg2.extras import execute_values
 from typing import Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+def get_table_name() -> str:
+    """
+    Get the UAL mapping table name from environment variable.
+    Defaults to 'ual_mapping' for testnet, 'mainnet_uals' for mainnet.
+    """
+    table_name = os.getenv('DKG_UAL_TABLE_NAME')
+    if table_name:
+        return table_name
+    
+    blockchain = os.getenv('DKG_BLOCKCHAIN', '')
+    if '20430' in blockchain or 'testnet' in blockchain.lower():
+        return 'ual_mapping'
+    elif '2043' in blockchain or 'mainnet' in blockchain.lower():
+        return 'mainnet_uals'
+    
+    return 'ual_mapping'
 
 
 def get_db_config() -> Dict[str, Any]:
@@ -53,7 +77,8 @@ def get_connection():
 
 def create_ual_mapping_table() -> bool:
     """
-    Create the ual_mapping table if it doesn't exist.
+    Create the UAL mapping table if it doesn't exist.
+    Table name is determined by get_table_name() (from DKG_UAL_TABLE_NAME env var or DKG_BLOCKCHAIN).
     
     Table structure:
     - chunk_id: VARCHAR (deterministic chunk identifier)
@@ -67,11 +92,12 @@ def create_ual_mapping_table() -> bool:
     Primary key: (chunk_id, chunk_hash)
     Indexes: chunk_id, chunk_hash, ual
     """
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS ual_mapping (
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {table_name} (
                         chunk_id VARCHAR(500) NOT NULL,
                         chunk_hash VARCHAR(64) NOT NULL,
                         ual VARCHAR(500) NOT NULL,
@@ -83,26 +109,26 @@ def create_ual_mapping_table() -> bool:
                     );
                 """)
                 
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_ual_mapping_chunk_id 
-                    ON ual_mapping(chunk_id);
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_chunk_id 
+                    ON {table_name}(chunk_id);
                 """)
                 
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_ual_mapping_chunk_hash 
-                    ON ual_mapping(chunk_hash);
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_chunk_hash 
+                    ON {table_name}(chunk_hash);
                 """)
                 
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_ual_mapping_ual 
-                    ON ual_mapping(ual);
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_ual 
+                    ON {table_name}(ual);
                 """)
                 
                 conn.commit()
-                logger.info("Created ual_mapping table and indexes")
+                logger.info(f"Created {table_name} table and indexes")
                 return True
     except Exception as e:
-        logger.error(f"Failed to create ual_mapping table: {e}")
+        logger.error(f"Failed to create {table_name} table: {e}")
         return False
 
 
@@ -129,11 +155,12 @@ def upsert_ual_mapping(
     if not published_at:
         published_at = datetime.now()
     
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO ual_mapping 
+                cur.execute(f"""
+                    INSERT INTO {table_name} 
                         (chunk_id, chunk_hash, ual, asset_version, published_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (chunk_id, chunk_hash)
@@ -192,10 +219,11 @@ def batch_upsert_ual_mappings(
                 if not values:
                     return 0
                 
+                table_name = get_table_name()
                 execute_values(
                     cur,
-                    """
-                    INSERT INTO ual_mapping 
+                    f"""
+                    INSERT INTO {table_name} 
                         (chunk_id, chunk_hash, ual, asset_version, published_at)
                     VALUES %s
                     ON CONFLICT (chunk_id, chunk_hash)
@@ -230,12 +258,13 @@ def get_ual_mapping(chunk_id: str, chunk_hash: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with ual, asset_version, published_at, or None if not found
     """
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT ual, asset_version, published_at, created_at, updated_at
-                    FROM ual_mapping
+                    FROM {table_name}
                     WHERE chunk_id = %s AND chunk_hash = %s;
                 """, (chunk_id, chunk_hash))
                 
@@ -264,12 +293,13 @@ def load_all_ual_mappings() -> Dict[Tuple[str, str], Dict[str, Any]]:
     """
     index: Dict[Tuple[str, str], Dict[str, Any]] = {}
     
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT chunk_id, chunk_hash, ual, asset_version, published_at
-                    FROM ual_mapping;
+                    FROM {table_name};
                 """)
                 
                 for row in cur.fetchall():
@@ -299,12 +329,13 @@ def get_uals_by_source(source_prefix: str) -> list[str]:
     Returns:
         List of unique UALs
     """
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT DISTINCT ual
-                    FROM ual_mapping
+                    FROM {table_name}
                     WHERE chunk_id LIKE %s;
                 """, (f"{source_prefix}:%",))
                 
@@ -326,11 +357,12 @@ def delete_ual_mappings_by_source(source_prefix: str) -> int:
     Returns:
         Number of mappings deleted
     """
+    table_name = get_table_name()
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM ual_mapping
+                cur.execute(f"""
+                    DELETE FROM {table_name}
                     WHERE chunk_id LIKE %s;
                 """, (f"{source_prefix}:%",))
                 
